@@ -1,5 +1,5 @@
 <%- include('../partials/head') %>
-<p><a href="/admin">← Administración</a></p>
+<p><a href="<%= ev.id ? '/admin/eventos/' + ev.id : '/admin' %>">← <%= ev.id ? 'Volver al evento' : 'Administración' %></a></p>
 <h1><%= title %></h1>
 <div class="card" style="max-width:720px">
   <% if (error) { %><div class="err"><%= error %></div><% } %>
@@ -21,6 +21,10 @@
     <label>Imagen de portada</label>
     <% if (ev.image) { %><img src="/uploads/<%= ev.image %>" style="max-height:120px;border-radius:8px;display:block;margin-bottom:6px" alt=""><label class="check"><input type="checkbox" name="remove_image" value="1"> Quitar imagen actual</label><% } %>
     <input type="file" name="image" accept="image/*">
+    <% if (typeof isOrganizer !== 'undefined' && isOrganizer && ev.status === 'approved') { %>
+    <div class="help">Publicación y privacidad las controla el administrador.</div>
+    <input type="hidden" name="published" value="<%= ev.published ? '1' : '' %>"><% if (ev.access_code) { %><input type="hidden" name="is_private" value="1"><input type="hidden" name="access_code" value="<%= ev.access_code %>"><% } %>
+    <% } else { %>
     <label class="check"><input type="checkbox" name="published" value="1" <%= ev.published ? 'checked' : '' %>> Publicado (visible para la familia)</label>
     <label class="check"><input type="checkbox" name="is_private" value="1" id="isPrivate" <%= ev.access_code ? 'checked' : '' %>> 🔒 Evento privado (solo con código de invitación)</label>
     <div id="codeBox" <%= ev.access_code ? '' : 'hidden' %>>
@@ -29,6 +33,10 @@
       <div class="help">Solo verán este evento quienes ingresen el código. Compártelo junto con el enlace del evento.</div>
     </div>
     <script>document.getElementById('isPrivate').addEventListener('change', e => { document.getElementById('codeBox').hidden = !e.target.checked; });</script>
+    <% } %>
+    <h2 class="mt2">Recaudo de este evento</h2>
+    <p class="help">Déjalo vacío para usar el Nequi general del sitio (Ajustes).</p>
+    <%- include('../partials/pay_fields', { ev }) %>
     <div class="row mt"><button class="btn">Guardar</button><a class="btn ghost" href="<%= ev.id ? '/admin/eventos/'+ev.id : '/admin' %>">Cancelar</a></div>
   </form>
 </div>

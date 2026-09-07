@@ -1,5 +1,6 @@
 const express = require('express');
-const { db, settings, eventDates, household, companionsFor, addHouseholdMember, uniqueCompanions, isFullName } = require('../db');
+const { db, settings, eventDates, household, companionsFor, addHouseholdMember, uniqueCompanions, isFullName, syncEventRange, canManage } = require('../db');
+const { upload, csrfCheck } = require('../middleware');
 const { requireLogin } = require('../middleware');
 const h = require('../helpers');
 
@@ -18,8 +19,9 @@ r.get('/', requireLogin, (req, res) => {
   const now = h.nowLocalISO();
   // Eventos privados: solo se listan si el integrante ya ingresó el código (o es admin)
   const vis = req.user.role === 'admin' ? '' : `AND (access_code IS NULL OR access_code = '' OR id IN (SELECT event_id FROM event_access WHERE user_id = ${req.user.id}))`;
-  const upcoming = db.prepare(`SELECT * FROM events WHERE published = 1 ${vis} AND COALESCE(ends_at, starts_at) >= ? ORDER BY starts_at ASC`).all(now);
-  const past = db.prepare(`SELECT * FROM events WHERE published = 1 ${vis} AND COALESCE(ends_at, starts_at) < ? ORDER BY starts_at DESC LIMIT 12`).all(now);
+  const upcoming = db.prepare(`SELECT * FROM events WHERE published = 1 AND status = 'approved' ${vis} AND COALESCE(ends_at, starts_at) >= ? ORDER BY starts_at ASC`).all(now);
+  const past = db.prepare(`SELECT * FROM events WHERE published = 1 AND status = 'approved' ${vis} AND COALESCE(ends_at, starts_at) < ? ORDER BY starts_at DESC LIMIT 12`).all(now);
+  const myEvents = db.prepare('SELECT * FROM events WHERE organizer_id = ? ORDER BY created_at DESC').all(req.user.id);
   const myRsvps = {};
   for (const x of db.prepare('SELECT event_id, status FROM rsvps WHERE user_id = ?').all(req.user.id)) myRsvps[x.event_id] = x.status;
   const pendingOrders = db.prepare("SELECT COUNT(*) AS n FROM orders WHERE user_id = ? AND status = 'pending'").get(req.user.id).n;
@@ -28,7 +30,7 @@ r.get('/', requireLogin, (req, res) => {
     const nextDate = dates.find(d => !h.isPast(d.ends_at || d.starts_at)) || dates[dates.length - 1] || null;
     return { ...e, stats: eventStats.get(e.id), dates, nextDate };
   });
-  res.render('home', { title: 'Eventos', upcoming: withStats(upcoming), past: withStats(past), myRsvps, pendingOrders });
+  res.render('home', { title: 'Eventos', upcoming: withStats(upcoming), past: withStats(past), myRsvps, pendingOrders, myEvents });
 });
 
 function hasAccess(ev, user) {
@@ -37,14 +39,15 @@ function hasAccess(ev, user) {
 }
 function loadEvent(req, res, next) {
   const ev = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
-  if (!ev || (!ev.published && req.user.role !== 'admin')) return res.status(404).render('error', { title: 'No encontrado', message: 'Este evento no existe.' });
+  // Sin publicar o sin aprobar: solo admin y organizador
+  if (!ev || ((!ev.published || ev.status !== 'approved') && !canManage(ev, req.user))) return res.status(404).render('error', { title: 'No encontrado', message: 'Este evento no existe.' });
   if (!hasAccess(ev, req.user)) return res.status(403).render('event_locked', { title: 'Evento privado', ev, error: null });
   req.event = ev; next();
 }
 
 // Ingresar código de un evento privado
 r.post('/eventos/:id/codigo', requireLogin, (req, res) => {
-  const ev = db.prepare('SELECT * FROM events WHERE id = ? AND published = 1').get(req.params.id);
+  const ev = db.prepare("SELECT * FROM events WHERE id = ? AND published = 1 AND status = 'approved'").get(req.params.id);
   if (!ev) return res.status(404).render('error', { title: 'No encontrado', message: 'Este evento no existe.' });
   const code = String(req.body.code || '').trim().toUpperCase();
   if (!ev.access_code || code !== ev.access_code.toUpperCase()) {
@@ -55,10 +58,44 @@ r.post('/eventos/:id/codigo', requireLogin, (req, res) => {
   res.redirect(`/eventos/${ev.id}`);
 });
 
+// ---- Proponer un evento (integrantes) ----
+r.get('/eventos/organizar', requireLogin, (req, res) => res.render('event_propose', { title: 'Organizar un evento', ev: {}, error: null }));
+r.post('/eventos/organizar', requireLogin, upload.fields([{ name: 'image', maxCount: 1 }, { name: 'pay_qr', maxCount: 1 }]), csrfCheck, (req, res) => {
+  const b = req.body, files = req.files || {};
+  const f = {
+    title: String(b.title || '').trim().slice(0, 120), description: String(b.description || '').trim() || null,
+    starts_at: String(b.starts_at || '').trim(), ends_at: String(b.ends_at || '').trim() || null,
+    location: String(b.location || '').trim() || null, address: String(b.address || '').trim() || null,
+    rsvp_deadline: String(b.rsvp_deadline || '').trim() || null,
+    is_private: !!b.is_private,
+    pay_method: ['nequi', 'breb'].includes(b.pay_method) ? b.pay_method : 'nequi',
+    pay_number: String(b.pay_number || '').trim().slice(0, 80) || null, pay_holder: String(b.pay_holder || '').trim().slice(0, 80) || null,
+  };
+  if (!f.title || !f.starts_at) return res.status(400).render('event_propose', { title: 'Organizar un evento', ev: f, error: 'Título y fecha de inicio son obligatorios.' });
+  if (b.sells && !f.pay_number) return res.status(400).render('event_propose', { title: 'Organizar un evento', ev: f, error: 'Si vas a vender algo, indica el Nequi o la llave Bre-B donde recibirás el dinero.' });
+  if (!b.sells) { f.pay_number = null; f.pay_holder = null; }
+  const abc = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; let code = ''; for (let i = 0; i < 6; i++) code += abc[Math.floor(Math.random() * abc.length)];
+  const info = db.prepare(`INSERT INTO events (title, description, starts_at, ends_at, location, address, rsvp_deadline, published, access_code, image, created_by, organizer_id, status, pay_method, pay_number, pay_holder, pay_qr)
+    VALUES (@title, @description, @starts_at, @ends_at, @location, @address, @rsvp_deadline, 1, @access_code, @image, @by, @by, 'pending', @pay_method, @pay_number, @pay_holder, @pay_qr)`)
+    .run({ ...f, access_code: f.is_private ? code : null, image: files.image ? files.image[0].filename : null, pay_qr: files.pay_qr ? files.pay_qr[0].filename : null, by: req.user.id });
+  db.prepare('INSERT INTO event_dates (event_id, starts_at, ends_at, location, address) VALUES (?, ?, ?, ?, ?)').run(info.lastInsertRowid, f.starts_at, f.ends_at, f.location, f.address);
+  req.flash('ok', 'Tu evento quedó pendiente de aprobación. Un administrador lo revisará; mientras tanto puedes completar fechas y productos.');
+  res.redirect(`/admin/eventos/${info.lastInsertRowid}`);
+});
+
+// Mis eventos (organizador)
+r.get('/mis-eventos', requireLogin, (req, res) => {
+  const list = db.prepare(`SELECT e.*, (SELECT COUNT(*) FROM rsvps WHERE event_id = e.id AND status = 'yes') AS going,
+      (SELECT COUNT(*) FROM orders WHERE event_id = e.id AND status = 'review') AS review,
+      (SELECT COALESCE(SUM(total),0) FROM orders WHERE event_id = e.id AND status = 'paid') AS paid
+    FROM events e WHERE organizer_id = ? ORDER BY created_at DESC`).all(req.user.id);
+  res.render('my_events', { title: 'Mis eventos', list });
+});
+
 // Buscar evento privado por código (desde el inicio)
 r.post('/eventos/codigo', requireLogin, (req, res) => {
   const code = String(req.body.code || '').trim().toUpperCase();
-  const ev = code ? db.prepare('SELECT * FROM events WHERE published = 1 AND UPPER(access_code) = ?').get(code) : null;
+  const ev = code ? db.prepare("SELECT * FROM events WHERE published = 1 AND status = 'approved' AND UPPER(access_code) = ?").get(code) : null;
   if (!ev) { req.flash('bad', 'No hay ningún evento con ese código.'); return res.redirect('/'); }
   db.prepare('INSERT OR IGNORE INTO event_access (event_id, user_id) VALUES (?, ?)').run(ev.id, req.user.id);
   req.flash('ok', `¡Bienvenido/a a "${ev.title}"!`);
@@ -92,6 +129,7 @@ r.get('/eventos/:id', requireLogin, loadEvent, (req, res) => {
   const myDates = new Set(db.prepare('SELECT dr.date_id FROM date_rsvps dr JOIN event_dates d ON d.id = dr.date_id WHERE d.event_id = ? AND dr.user_id = ?').all(ev.id, req.user.id).map(x => x.date_id));
   const members = household(req.user.id);
   const myCompanions = new Set(companionsFor(ev.id, req.user.id).map(c => c.id));
+  res.locals.canManage = canManage(ev, req.user);
   res.render('event', { title: ev.title, ev, stats, myRsvp, attendees, products, myOrders, rsvpClosed, dates, myDates, members, myCompanions,
     gcal: h.googleCalUrl(ev, url) });
 });

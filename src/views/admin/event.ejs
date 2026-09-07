@@ -1,9 +1,32 @@
 <%- include('../partials/head') %>
-<p><a href="/admin">← Administración</a></p>
+<p><a href="<%= isOrganizer ? '/mis-eventos' : '/admin' %>">← <%= isOrganizer ? 'Mis eventos' : 'Administración' %></a></p>
+<% const ST = { pending: ['Pendiente de aprobación', 'warn'], approved: ['Aprobado', 'ok'], rejected: ['Rechazado', 'bad'] }; %>
+<% if (ev.status !== 'approved' || organizer) { %>
+<div class="card mb" style="<%= ev.status === 'pending' ? 'border-color:var(--accent)' : '' %>">
+  <div class="row between">
+    <div>
+      <span class="badge <%= ST[ev.status][1] %>"><%= ST[ev.status][0] %></span>
+      <% if (organizer) { %> · Organiza <b><%= organizer.name %></b><% if (!isOrganizer) { %> <span class="small muted">(<%= organizer.email %><%= organizer.phone ? ' · ' + organizer.phone : '' %>)</span><% } %><% } %>
+      <% if (ev.status === 'pending') { %><p class="small muted" style="margin:4px 0 0"><%= isOrganizer ? 'Un administrador revisará tu evento. Mientras tanto puedes completar fechas y productos; la familia lo verá cuando sea aprobado.' : 'Revisa los datos (y el recaudo, si vende algo) y aprueba o rechaza.' %></p><% } %>
+      <% if (ev.status === 'rejected' && ev.reject_reason) { %><p class="small" style="margin:4px 0 0;color:var(--bad)">Motivo: <%= ev.reject_reason %></p><% } %>
+    </div>
+    <% if (!isOrganizer && ev.status !== 'approved') { %>
+    <div class="row" style="gap:6px">
+      <form method="post" action="/admin/eventos/<%= ev.id %>/aprobar"><input type="hidden" name="_csrf" value="<%= csrf %>"><button class="btn">✅ Aprobar y publicar</button></form>
+      <% if (ev.status === 'pending') { %>
+      <form method="post" action="/admin/eventos/<%= ev.id %>/rechazar" class="row" style="gap:4px"><input type="hidden" name="_csrf" value="<%= csrf %>">
+        <input type="text" name="reason" placeholder="Motivo (lo verá el organizador)" style="width:220px;padding:6px 8px"><button class="btn bad">Rechazar</button></form>
+      <% } %>
+    </div>
+    <% } %>
+  </div>
+</div>
+<% } %>
 <div class="row between">
   <div><h1><%= ev.title %> <% if (!ev.published) { %><span class="badge warn">Borrador</span><% } %></h1><p class="muted"><%= h.fmtDateTime(ev.starts_at) %><% if (ev.location) { %> · <%= ev.location %><% } %></p></div>
   <div class="row">
     <a class="btn sec sm" href="/eventos/<%= ev.id %>">Ver como integrante</a>
+    <% if (pay.own) { %><span class="badge brand" title="<%= pay.holder %>">💸 <%= pay.method === 'breb' ? 'Bre-B' : 'Nequi' %> <%= pay.number %></span><% } else { %><span class="badge muted" title="Se usa el Nequi general del sitio">💸 Nequi del sitio</span><% } %>
     <a class="btn ghost sm" href="/admin/eventos/<%= ev.id %>/editar">Editar</a>
     <a class="btn sm" href="/admin/eventos/<%= ev.id %>/exportar.xlsx">📊 Exportar Excel</a>
   </div>
@@ -125,7 +148,9 @@
   <% } %>
 </div>
 
+<% if (!isOrganizer || ev.status !== 'approved') { %>
 <form method="post" action="/admin/eventos/<%= ev.id %>/eliminar" data-confirm="Se eliminará el evento con sus productos, pedidos y asistencias. ¿Seguro?" class="right">
   <input type="hidden" name="_csrf" value="<%= csrf %>"><button class="btn bad sm">Eliminar evento</button>
 </form>
+<% } %>
 <%- include('../partials/foot') %>

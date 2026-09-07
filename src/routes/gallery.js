@@ -12,7 +12,7 @@ const removeFile = (f) => { if (f) { try { fs.unlinkSync(path.join(GAL, f)); } c
 // Eventos que el usuario puede ver (para etiquetar y filtrar)
 function visibleEvents(user) {
   const vis = user.role === 'admin' ? '' : `AND (access_code IS NULL OR access_code = '' OR id IN (SELECT event_id FROM event_access WHERE user_id = ${user.id}))`;
-  return db.prepare(`SELECT id, title, starts_at FROM events WHERE published = 1 ${vis} ORDER BY starts_at DESC`).all();
+  return db.prepare(`SELECT id, title, starts_at FROM events WHERE published = 1 AND status = 'approved' ${vis} ORDER BY starts_at DESC`).all();
 }
 
 const listQuery = (where) => `

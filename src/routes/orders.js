@@ -1,7 +1,7 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const { db, DATA_DIR, household } = require('../db');
+const { db, DATA_DIR, household, paymentFor } = require('../db');
 const { requireLogin, upload, csrfCheck } = require('../middleware');
 const h = require('../helpers');
 const { soldQty } = require('./events');
@@ -41,7 +41,7 @@ function parseItems(body, ev, excludeOrderId = null) {
 
 // Crear pedido
 r.post('/eventos/:id/pedido', requireLogin, (req, res) => {
-  const ev = db.prepare('SELECT * FROM events WHERE id = ? AND published = 1').get(req.params.id);
+  const ev = db.prepare("SELECT * FROM events WHERE id = ? AND published = 1 AND status = 'approved'").get(req.params.id);
   if (!ev) return res.status(404).render('error', { title: 'No encontrado', message: 'Evento no encontrado.' });
   if (ev.access_code && req.user.role !== 'admin' && !db.prepare('SELECT 1 FROM event_access WHERE event_id = ? AND user_id = ?').get(ev.id, req.user.id))
     return res.status(403).render('error', { title: 'Evento privado', message: 'Necesitas el código del evento para hacer pedidos.' });
@@ -58,8 +58,9 @@ r.post('/eventos/:id/pedido', requireLogin, (req, res) => {
 });
 
 function loadOrder(req, res, next) {
-  const o = db.prepare('SELECT o.*, e.title AS event_title FROM orders o JOIN events e ON e.id = o.event_id WHERE o.id = ?').get(req.params.id);
-  if (!o || (o.user_id !== req.user.id && req.user.role !== 'admin')) return res.status(404).render('error', { title: 'No encontrado', message: 'Pedido no encontrado.' });
+  const o = db.prepare('SELECT o.*, e.title AS event_title, e.organizer_id FROM orders o JOIN events e ON e.id = o.event_id WHERE o.id = ?').get(req.params.id);
+  if (!o || (o.user_id !== req.user.id && req.user.role !== 'admin' && o.organizer_id !== req.user.id)) return res.status(404).render('error', { title: 'No encontrado', message: 'Pedido no encontrado.' });
+  o.pay = paymentFor(db.prepare('SELECT * FROM events WHERE id = ?').get(o.event_id));
   o.items = db.prepare('SELECT oi.*, p.name FROM order_items oi JOIN products p ON p.id = oi.product_id WHERE order_id = ?').all(o.id);
   req.order = o; next();
 }

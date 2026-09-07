@@ -1,0 +1,16 @@
+<%# Campos de recaudo (Nequi / Bre-B) de un evento. Requiere: ev %>
+<div class="grid two">
+  <div>
+    <label>¿Dónde recibes el dinero?</label>
+    <div class="seg">
+      <label><input type="radio" name="pay_method" value="nequi" <%= (ev.pay_method || 'nequi') === 'nequi' ? 'checked' : '' %>><span>Nequi</span></label>
+      <label><input type="radio" name="pay_method" value="breb" <%= ev.pay_method === 'breb' ? 'checked' : '' %>><span>Llave Bre-B</span></label>
+    </div>
+  </div>
+  <div><label>Número de Nequi o llave Bre-B</label><input type="text" name="pay_number" value="<%= ev.pay_number || '' %>" placeholder="300 123 4567 · @llave · correo"></div>
+</div>
+<label>A nombre de</label><input type="text" name="pay_holder" value="<%= ev.pay_holder || '' %>" placeholder="Titular de la cuenta">
+<label>QR de pago (opcional)</label>
+<% if (ev.pay_qr) { %><img src="/uploads/<%= ev.pay_qr %>" style="max-height:140px;border-radius:8px;display:block;margin-bottom:6px" alt="QR"><label class="check"><input type="checkbox" name="remove_pay_qr" value="1"> Quitar QR</label><% } %>
+<input type="file" name="pay_qr" accept="image/*">
+<div class="help">Los pagos de los productos de este evento llegan a esta cuenta y el organizador los confirma en su panel.</div>

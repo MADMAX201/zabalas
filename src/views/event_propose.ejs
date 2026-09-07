@@ -1,0 +1,41 @@
+<%- include('partials/head') %>
+<p><a href="/">← Eventos</a></p>
+<h1>Organizar un evento</h1>
+<p class="muted">Cuéntanos qué quieres organizar. Un administrador lo revisará y, al aprobarlo, quedará publicado y podrás administrarlo desde "Mis eventos".</p>
+<div class="card" style="max-width:720px">
+  <% if (error) { %><div class="err"><%= error %></div><% } %>
+  <form method="post" action="/eventos/organizar" enctype="multipart/form-data">
+    <input type="hidden" name="_csrf" value="<%= csrf %>">
+    <label>Título *</label><input type="text" name="title" value="<%= ev.title || '' %>" required placeholder="Campeonato de tejo Zabala 2026">
+    <label>Descripción</label><textarea name="description" placeholder="De qué se trata, qué llevar, para quién es…"><%= ev.description || '' %></textarea>
+    <div class="grid two">
+      <div><label>Inicio * <span class="muted small">(primera fecha)</span></label><input type="datetime-local" name="starts_at" value="<%= ev.starts_at || '' %>" required></div>
+      <div><label>Fin (opcional)</label><input type="datetime-local" name="ends_at" value="<%= ev.ends_at || '' %>"></div>
+    </div>
+    <div class="help">Si tiene varias fechas (ensayos, partidos), las agregas después en el panel del evento.</div>
+    <div class="grid two">
+      <div><label>Lugar</label><input type="text" name="location" value="<%= ev.location || '' %>"></div>
+      <div><label>Dirección</label><input type="text" name="address" value="<%= ev.address || '' %>"></div>
+    </div>
+    <label>Fecha límite para confirmar asistencia (opcional)</label><input type="datetime-local" name="rsvp_deadline" value="<%= ev.rsvp_deadline || '' %>">
+    <label>Imagen de portada</label><input type="file" name="image" accept="image/*">
+
+    <h2 class="mt2">¿Para quién es?</h2>
+    <div class="seg">
+      <label><input type="radio" name="is_private" value="" <%= !ev.is_private ? 'checked' : '' %>><span>👨‍👩‍👧 Toda la familia</span></label>
+      <label><input type="radio" name="is_private" value="1" <%= ev.is_private ? 'checked' : '' %>><span>🔒 Solo invitados (con código)</span></label>
+    </div>
+    <div class="help">Si es solo para invitados, al aprobarse recibirás un código para compartir con ellos.</div>
+
+    <h2 class="mt2">¿Vas a vender algo?</h2>
+    <label class="check"><input type="checkbox" name="sells" value="1" id="sells" <%= ev.pay_number ? 'checked' : '' %>> Sí, habrá productos con costo (camisetas, boletas, rifas…)</label>
+    <div id="payBox" <%= ev.pay_number ? '' : 'hidden' %>>
+      <%- include('partials/pay_fields', { ev }) %>
+      <div class="help">Los productos (nombre, tallas, precio) los creas tú en el panel del evento una vez aprobado.</div>
+    </div>
+    <script>document.getElementById('sells').addEventListener('change', e => { document.getElementById('payBox').hidden = !e.target.checked; });</script>
+
+    <div class="row mt2"><button class="btn">Enviar para aprobación</button><a class="btn ghost" href="/">Cancelar</a></div>
+  </form>
+</div>
+<%- include('partials/foot') %>

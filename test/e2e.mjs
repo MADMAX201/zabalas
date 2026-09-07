@@ -192,6 +192,46 @@ const xls3 = await admin.request.get(BASE + '/admin/eventos/3/exportar.xlsx'); o
 // evento de una sola fecha sigue igual
 await m.goto(BASE + '/eventos/1'); ok((await m.$$('input[name=date_ids]')).length === 0, 'evento de una fecha no muestra casillas');
 
+// --- Organizar un evento (integrante) + aprobación + panel de organizador ---
+await m.goto(BASE + '/eventos/organizar');
+await m.fill('[name=title]', 'Campeonato de tejo'); await m.fill('[name=starts_at]', '2026-10-10T09:00'); await m.fill('[name=location]', 'Cancha municipal');
+await m.click('label:has(input[name=is_private][value="1"]) span');
+await m.check('#sells'); await m.click('label:has(input[name=pay_method][value=breb]) span');
+await m.fill('[name=pay_number]', '@laurazabala'); await m.fill('[name=pay_holder]', 'Laura Zabala');
+await m.click('form[action="/eventos/organizar"] button.btn');
+ok(/\/admin\/eventos\/(\d+)$/.test(m.url()) && (await m.textContent('body')).includes('Pendiente de aprobación'), 'evento propuesto queda pendiente y abre panel');
+const orgId = Number(m.url().match(/eventos\/(\d+)$/)[1]);
+// organizador puede crear productos aun pendiente
+await m.goto(BASE + `/admin/eventos/${orgId}/productos/nuevo`);
+await m.fill('[name=name]', 'Inscripción equipo'); await m.fill('[name=price]', '20000'); await m.fill('[name=sizes]', ''); await m.click('button.btn');
+ok((await m.textContent('body')).includes('Inscripción equipo'), 'organizador creó producto');
+// organizador NO entra al admin general ni a otros eventos
+let r403 = await m.goto(BASE + '/admin'); ok(r403.status() === 403, 'organizador bloqueado en /admin');
+r403 = await m.goto(BASE + '/admin/eventos/1'); ok(r403.status() === 403, 'organizador bloqueado en evento ajeno');
+// otro integrante no ve el evento pendiente
+const p3 = await browser.newPage(); await p3.goto(BASE + '/registro');
+await p3.fill('#name', 'Pedro Zabala'); await p3.fill('#email', 'pedro@test.com'); await p3.fill('#password', 'pedro123'); await p3.fill('#password2', 'pedro123'); await p3.fill('#code', 'zabala2026'); await p3.click('button.btn');
+let rp = await p3.goto(BASE + `/eventos/${orgId}`); ok(rp.status() === 404, 'pendiente invisible para otros');
+ok(!(await p3.textContent('body')).includes('Campeonato'), 'ni en la lista');
+// admin ve por aprobar y aprueba
+await admin.goto(BASE + '/admin'); ok((await admin.textContent('body')).includes('Eventos por aprobar') && (await admin.textContent('body')).includes('Bre-B @laurazabala'), 'admin ve pendiente con recaudo');
+await admin.goto(BASE + `/admin/eventos/${orgId}`); await admin.click('form[action$="/aprobar"] button');
+ok((await admin.textContent('body')).includes('Evento aprobado'), 'admin aprobó');
+const code = (await admin.textContent('body')).match(/Código de invitación:\s*([A-Z0-9]{6})/); ok(!!code, 'código generado para evento privado');
+// organizador ve el código en su panel
+await m.goto(BASE + `/admin/eventos/${orgId}`); ok((await m.textContent('body')).includes(code[1]), 'organizador ve el código');
+await m.screenshot({ path: `${shots}/18-organizador.png`, fullPage: true });
+// Pedro entra con el código, pide, y ve el pago Bre-B del organizador
+await p3.goto(BASE + `/eventos/${orgId}`); await p3.fill('#code', code[1]); await p3.click('button.btn');
+await p3.click('.product .add-line'); await p3.click('#orderBtn');
+let pb = await p3.textContent('body'); ok(pb.includes('Paga por Bre-B') && pb.includes('@laurazabala'), 'pedido muestra Bre-B del organizador');
+await p3.setInputFiles('#receipt', 'public/img/logo.jpeg'); await p3.click('form[enctype] button.btn');
+// organizador confirma el pago
+await m.goto(BASE + `/admin/eventos/${orgId}`); await m.click('button[value=paid]');
+ok((await m.textContent('body')).includes('Pagado'), 'organizador confirmó pago');
+await m.goto(BASE + '/mis-eventos'); ok((await m.textContent('body')).includes('$20.000'), 'mis eventos muestra recaudado');
+await p3.close();
+
 // --- Galería ---
 await m.goto(BASE + '/galeria/subir?evento=1');
 await m.setInputFiles('#files', ['public/img/logo.jpeg', 'test/shots/01-login.png']);

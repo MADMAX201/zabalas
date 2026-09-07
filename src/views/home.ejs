@@ -4,7 +4,10 @@
     <h1>Hola, <%= user.name.split(' ')[0] %> 👋</h1>
     <p class="muted">Estos son los próximos encuentros de la familia.</p>
   </div>
-  <% if (user.role === 'admin') { %><a class="btn" href="/admin/eventos/nuevo">+ Nuevo evento</a><% } %>
+  <div class="row">
+    <% if (user.role === 'admin') { %><a class="btn" href="/admin/eventos/nuevo">+ Nuevo evento</a><% } %>
+    <a class="btn <%= user.role === 'admin' ? 'sec' : '' %>" href="/eventos/organizar">🎪 Organizar un evento</a>
+  </div>
 </div>
 
 <% if (pendingOrders) { %>
@@ -33,6 +36,18 @@
     </div>
   </a>
 <% }; %>
+
+<% if (myEvents.length) { const ST = { pending: ['Pendiente de aprobación', 'warn'], approved: ['Aprobado', 'ok'], rejected: ['Rechazado', 'bad'] }; %>
+<div class="card mb">
+  <div class="row between"><h2 style="margin:0">🎪 Mis eventos</h2><a class="small" href="/mis-eventos">Ver todos</a></div>
+  <table class="tbl mt">
+    <% myEvents.slice(0, 4).forEach(e => { %>
+    <tr><td><a href="/admin/eventos/<%= e.id %>"><b><%= e.title %></b></a> <span class="small muted"><%= h.fmtShort(e.starts_at) %></span></td>
+      <td class="right"><span class="badge <%= ST[e.status][1] %>"><%= ST[e.status][0] %></span></td></tr>
+    <% }) %>
+  </table>
+</div>
+<% } %>
 
 <h2 class="mt">Próximos eventos</h2>
 <% if (!upcoming.length) { %>

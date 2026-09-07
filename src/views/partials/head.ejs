@@ -17,6 +17,7 @@
       <a href="/" class="<%= path === '/' ? 'on' : '' %>">Eventos</a>
       <a href="/galeria" class="<%= path.startsWith('/galeria') ? 'on' : '' %>">Galería</a>
       <a href="/pedidos" class="<%= path.startsWith('/pedidos') ? 'on' : '' %>">Mis pedidos</a>
+      <% if (user.role !== 'admin' && typeof isOrganizerNav !== 'undefined' && isOrganizerNav) { %><a href="/mis-eventos" class="<%= path.startsWith('/mis-eventos') ? 'on' : '' %>">Mis eventos</a><% } %>
       <% if (user.role === 'admin') { %><a href="/admin" class="<%= path.startsWith('/admin') ? 'on' : '' %>">Admin</a><% } %>
       <a href="/perfil" class="<%= path === '/perfil' ? 'on' : '' %>"><%= user.name.split(' ')[0] %></a>
       <form method="post" action="/logout" class="inline"><input type="hidden" name="_csrf" value="<%= csrf %>"><button class="linkbtn">Salir</button></form>

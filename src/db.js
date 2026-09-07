@@ -94,6 +94,11 @@ CREATE TABLE IF NOT EXISTS order_items (
 // ---- Migraciones incrementales ----
 const cols = (t) => db.prepare(`PRAGMA table_info(${t})`).all().map(c => c.name);
 if (!cols('events').includes('access_code')) db.exec('ALTER TABLE events ADD COLUMN access_code TEXT');
+// Eventos propuestos por integrantes (organizador) con aprobación y recaudo propio
+for (const [c, def] of [['organizer_id', 'INTEGER REFERENCES users(id) ON DELETE SET NULL'], ['status', "TEXT NOT NULL DEFAULT 'approved'"], ['reject_reason', 'TEXT'],
+  ['pay_method', 'TEXT'], ['pay_number', 'TEXT'], ['pay_holder', 'TEXT'], ['pay_qr', 'TEXT']]) {
+  if (!cols('events').includes(c)) db.exec(`ALTER TABLE events ADD COLUMN ${c} ${def}`);
+}
 db.exec(`
 CREATE TABLE IF NOT EXISTS event_access (
   event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
@@ -237,4 +242,12 @@ function eventDates(eventId) {
   return db.prepare('SELECT * FROM event_dates WHERE event_id = ? ORDER BY starts_at').all(eventId);
 }
 
-module.exports = { db, settings, DATA_DIR, syncEventRange, eventDates, household, companionsFor, findSimilar, addHouseholdMember, uniqueCompanions, normName, isFullName };
+// Datos de recaudo de un evento: propios (organizador) o los generales del sitio
+function paymentFor(ev) {
+  if (ev && ev.pay_number) return { method: ev.pay_method || 'nequi', number: ev.pay_number, holder: ev.pay_holder || '', qr: ev.pay_qr || '', own: true };
+  const st = settings.all();
+  return { method: 'nequi', number: st.nequi_number || '', holder: st.nequi_holder || '', qr: st.nequi_qr || '', own: false };
+}
+const canManage = (ev, user) => !!user && (user.role === 'admin' || (ev && ev.organizer_id === user.id));
+
+module.exports = { paymentFor, canManage, db, settings, DATA_DIR, syncEventRange, eventDates, household, companionsFor, findSimilar, addHouseholdMember, uniqueCompanions, normName, isFullName };

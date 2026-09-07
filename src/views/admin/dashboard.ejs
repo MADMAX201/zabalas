@@ -9,6 +9,18 @@
   <div class="stat"><b><%= h.fmtCOP(stats.paidTotal) %></b><span>recaudado total</span></div>
 </div>
 
+<% if (pendingEvents.length) { %>
+<div class="card mb" style="border-color:var(--accent)">
+  <h2>🎪 Eventos por aprobar</h2>
+  <table class="tbl">
+    <% pendingEvents.forEach(e => { %>
+    <tr><td><a href="/admin/eventos/<%= e.id %>"><b><%= e.title %></b></a><% if (e.access_code) { %> 🔒<% } %><br><span class="small muted"><%= h.fmtDateTime(e.starts_at) %> · organiza <%= e.organizer_name %><% if (e.pay_number) { %> · recaudo: <%= e.pay_method === 'breb' ? 'Bre-B' : 'Nequi' %> <%= e.pay_number %><% } %></span></td>
+      <td class="right"><a class="btn sm" href="/admin/eventos/<%= e.id %>">Revisar</a></td></tr>
+    <% }) %>
+  </table>
+</div>
+<% } %>
+
 <% if (reviewOrders.length) { %>
 <div class="card mb">
   <h2>🕒 Pagos por verificar</h2>
@@ -28,7 +40,7 @@
   <% if (!events.length) { %><tr><td colspan="6" class="center muted">Sin eventos todavía.</td></tr><% } %>
   <% events.forEach(e => { %>
   <tr>
-    <td><a href="/admin/eventos/<%= e.id %>"><b><%= e.title %></b></a> <% if (!e.published) { %><span class="badge warn">Borrador</span><% } %></td>
+    <td><a href="/admin/eventos/<%= e.id %>"><b><%= e.title %></b></a> <% if (!e.published) { %><span class="badge warn">Borrador</span><% } %><% if (e.status === 'pending') { %><span class="badge warn">Por aprobar</span><% } else if (e.status === 'rejected') { %><span class="badge bad">Rechazado</span><% } %><% if (e.organizer_name) { %><br><span class="small muted">organiza <%= e.organizer_name %></span><% } %></td>
     <td><%= h.fmtShort(e.starts_at) %></td>
     <td><%= e.going %></td><td><%= e.paid %></td><td><%= e.review ? `<b>${e.review}</b>` : 0 %></td>
     <td class="right"><a class="btn ghost sm" href="/admin/eventos/<%= e.id %>/editar">Editar</a></td>

@@ -3,17 +3,17 @@ const fs = require('fs');
 const path = require('path');
 const ExcelJS = require('exceljs');
 const bcrypt = require('bcryptjs');
-const { db, settings, DATA_DIR, syncEventRange, eventDates, companionsFor, uniqueCompanions } = require('../db');
-const { requireAdmin, upload, csrfCheck } = require('../middleware');
+const { db, settings, DATA_DIR, syncEventRange, eventDates, companionsFor, uniqueCompanions, paymentFor } = require('../db');
+const { requireAdmin, requireManager, upload, csrfCheck } = require('../middleware');
 const h = require('../helpers');
 
 const r = express.Router();
-r.use(requireAdmin);
+r.use(requireManager);
 
 const removeFile = (f) => { if (f) { try { fs.unlinkSync(path.join(DATA_DIR, 'uploads', f)); } catch {} } };
 
 // ---------- Dashboard ----------
-r.get('/', (req, res) => {
+r.get('/', requireAdmin, (req, res) => {
   const now = h.nowLocalISO();
   const stats = {
     users: db.prepare('SELECT COUNT(*) AS n FROM users WHERE active = 1').get().n,
@@ -25,11 +25,13 @@ r.get('/', (req, res) => {
   const events = db.prepare(`SELECT e.*,
       (SELECT COUNT(*) FROM rsvps WHERE event_id = e.id AND status='yes') AS going,
       (SELECT COUNT(*) FROM orders WHERE event_id = e.id AND status IN ('review')) AS review,
-      (SELECT COUNT(*) FROM orders WHERE event_id = e.id AND status IN ('paid')) AS paid
+      (SELECT COUNT(*) FROM orders WHERE event_id = e.id AND status IN ('paid')) AS paid,
+      (SELECT name FROM users WHERE id = e.organizer_id) AS organizer_name
     FROM events e ORDER BY starts_at DESC`).all();
   const reviewOrders = db.prepare(`SELECT o.*, u.name AS user_name, e.title AS event_title FROM orders o JOIN users u ON u.id=o.user_id JOIN events e ON e.id=o.event_id
     WHERE o.status='review' ORDER BY o.id ASC LIMIT 10`).all();
-  res.render('admin/dashboard', { title: 'Administración', stats, events, reviewOrders });
+  const pendingEvents = db.prepare(`SELECT e.*, u.name AS organizer_name FROM events e LEFT JOIN users u ON u.id = e.organizer_id WHERE e.status = 'pending' ORDER BY e.created_at`).all();
+  res.render('admin/dashboard', { title: 'Administración', stats, events, reviewOrders, pendingEvents });
 });
 
 // ---------- Eventos ----------
@@ -43,6 +45,9 @@ const eventForm = (body) => ({
   rsvp_deadline: String(body.rsvp_deadline || '').trim() || null,
   published: body.published ? 1 : 0,
   access_code: body.is_private ? (String(body.access_code || '').trim().toUpperCase().replace(/[^A-Z0-9-]/g, '') || genCode()) : null,
+  pay_method: ['nequi', 'breb'].includes(body.pay_method) ? body.pay_method : 'nequi',
+  pay_number: String(body.pay_number || '').trim().slice(0, 80) || null,
+  pay_holder: String(body.pay_holder || '').trim().slice(0, 80) || null,
 });
 function genCode() {
   const abc = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; let c = '';
@@ -50,13 +55,14 @@ function genCode() {
   return c;
 }
 
-r.get('/eventos/nuevo', (req, res) => res.render('admin/event_form', { title: 'Nuevo evento', ev: { published: 1 }, error: null }));
-r.post('/eventos/nuevo', upload.single('image'), csrfCheck, (req, res) => {
+r.get('/eventos/nuevo', requireAdmin, (req, res) => res.render('admin/event_form', { title: 'Nuevo evento', ev: { published: 1 }, error: null }));
+r.post('/eventos/nuevo', requireAdmin, upload.fields([{ name: 'image', maxCount: 1 }, { name: 'pay_qr', maxCount: 1 }]), csrfCheck, (req, res) => {
   const f = eventForm(req.body);
   if (!f.title || !f.starts_at) return res.status(400).render('admin/event_form', { title: 'Nuevo evento', ev: f, error: 'Título y fecha de inicio son obligatorios.' });
-  const info = db.prepare(`INSERT INTO events (title, description, starts_at, ends_at, location, address, rsvp_deadline, published, access_code, image, created_by)
-    VALUES (@title, @description, @starts_at, @ends_at, @location, @address, @rsvp_deadline, @published, @access_code, @image, @by)`)
-    .run({ ...f, image: req.file ? req.file.filename : null, by: req.user.id });
+  const files = req.files || {};
+  const info = db.prepare(`INSERT INTO events (title, description, starts_at, ends_at, location, address, rsvp_deadline, published, access_code, image, created_by, pay_method, pay_number, pay_holder, pay_qr, status)
+    VALUES (@title, @description, @starts_at, @ends_at, @location, @address, @rsvp_deadline, @published, @access_code, @image, @by, @pay_method, @pay_number, @pay_holder, @pay_qr, 'approved')`)
+    .run({ ...f, image: files.image ? files.image[0].filename : null, pay_qr: files.pay_qr ? files.pay_qr[0].filename : null, by: req.user.id });
   db.prepare('INSERT INTO event_dates (event_id, starts_at, ends_at, location, address) VALUES (?, ?, ?, ?, ?)').run(info.lastInsertRowid, f.starts_at, f.ends_at, f.location, f.address);
   req.flash('ok', 'Evento creado. Puedes agregar más fechas abajo si tiene varias sesiones.');
   res.redirect(`/admin/eventos/${info.lastInsertRowid}`);
@@ -97,18 +103,26 @@ r.get('/eventos/:id', loadEvent, (req, res) => {
   const dateRsvps = {};
   for (const x of db.prepare('SELECT dr.user_id, dr.date_id FROM date_rsvps dr JOIN event_dates d ON d.id = dr.date_id WHERE d.event_id = ?').all(ev.id)) (dateRsvps[x.user_id] = dateRsvps[x.user_id] || new Set()).add(x.date_id);
   const admitted = ev.access_code ? db.prepare('SELECT u.name, a.granted_at FROM event_access a JOIN users u ON u.id=a.user_id WHERE a.event_id=? ORDER BY a.granted_at DESC').all(ev.id) : [];
-  res.render('admin/event', { title: ev.title, ev, attendees, products, orders, totals, sizeSummary, admitted, dates, dateRsvps });
+  const organizer = ev.organizer_id ? db.prepare('SELECT id, name, email, phone FROM users WHERE id = ?').get(ev.organizer_id) : null;
+  res.render('admin/event', { title: ev.title, ev, attendees, products, orders, totals, sizeSummary, admitted, dates, dateRsvps, organizer, pay: paymentFor(ev) });
 });
 
 r.get('/eventos/:id/editar', loadEvent, (req, res) => res.render('admin/event_form', { title: 'Editar evento', ev: req.event, error: null }));
-r.post('/eventos/:id/editar', loadEvent, upload.single('image'), csrfCheck, (req, res) => {
+r.post('/eventos/:id/editar', loadEvent, upload.fields([{ name: 'image', maxCount: 1 }, { name: 'pay_qr', maxCount: 1 }]), csrfCheck, (req, res) => {
   const f = eventForm(req.body);
   if (!f.title || !f.starts_at) return res.status(400).render('admin/event_form', { title: 'Editar evento', ev: { ...req.event, ...f }, error: 'Título y fecha de inicio son obligatorios.' });
+  const files = req.files || {};
   let image = req.event.image;
   if (req.body.remove_image) { removeFile(image); image = null; }
-  if (req.file) { removeFile(req.event.image); image = req.file.filename; }
+  if (files.image) { removeFile(req.event.image); image = files.image[0].filename; }
+  let pay_qr = req.event.pay_qr;
+  if (req.body.remove_pay_qr) { removeFile(pay_qr); pay_qr = null; }
+  if (files.pay_qr) { removeFile(req.event.pay_qr); pay_qr = files.pay_qr[0].filename; }
+  // El organizador no puede cambiar publicado/privado de un evento ya aprobado (eso es del admin)
+  if (req.isOrganizer && req.event.status === 'approved') { f.published = req.event.published; f.access_code = req.event.access_code; }
   db.prepare(`UPDATE events SET title=@title, description=@description, starts_at=@starts_at, ends_at=@ends_at, location=@location, address=@address,
-    rsvp_deadline=@rsvp_deadline, published=@published, access_code=@access_code, image=@image WHERE id=@id`).run({ ...f, image, id: req.event.id });
+    rsvp_deadline=@rsvp_deadline, published=@published, access_code=@access_code, image=@image, pay_method=@pay_method, pay_number=@pay_number, pay_holder=@pay_holder, pay_qr=@pay_qr WHERE id=@id`)
+    .run({ ...f, image, pay_qr, id: req.event.id });
   // La fecha del formulario es la primera fecha del evento
   const first = eventDates(req.event.id)[0];
   if (first) db.prepare('UPDATE event_dates SET starts_at = ?, ends_at = ?, location = COALESCE(?, location), address = COALESCE(?, address) WHERE id = ?').run(f.starts_at, f.ends_at, f.location, f.address, first.id);
@@ -120,11 +134,25 @@ r.post('/eventos/:id/editar', loadEvent, upload.single('image'), csrfCheck, (req
 
 r.post('/eventos/:id/eliminar', loadEvent, (req, res) => {
   const ev = req.event;
+  if (req.isOrganizer && ev.status === 'approved') { req.flash('bad', 'Un evento aprobado solo lo elimina un administrador.'); return res.redirect(`/admin/eventos/${ev.id}`); }
   const files = db.prepare('SELECT receipt FROM orders WHERE event_id = ?').all(ev.id).map(o => o.receipt)
     .concat(db.prepare('SELECT image FROM products WHERE event_id = ?').all(ev.id).map(p => p.image), [ev.image]);
   db.prepare('DELETE FROM events WHERE id = ?').run(ev.id);
-  files.forEach(removeFile);
+  files.forEach(removeFile); removeFile(ev.pay_qr);
   req.flash('ok', 'Evento eliminado.');
+  res.redirect(req.isOrganizer ? '/mis-eventos' : '/admin');
+});
+
+// ---------- Aprobación de eventos propuestos ----------
+r.post('/eventos/:id/aprobar', requireAdmin, loadEvent, (req, res) => {
+  const code = req.event.access_code ? req.event.access_code : null;
+  db.prepare("UPDATE events SET status = 'approved', reject_reason = NULL, published = 1 WHERE id = ?").run(req.event.id);
+  req.flash('ok', `Evento aprobado y publicado${code ? ` (código de invitación ${code})` : ''}.`);
+  res.redirect(`/admin/eventos/${req.event.id}`);
+});
+r.post('/eventos/:id/rechazar', requireAdmin, loadEvent, (req, res) => {
+  db.prepare("UPDATE events SET status = 'rejected', reject_reason = ? WHERE id = ?").run(String(req.body.reason || '').trim().slice(0, 300) || null, req.event.id);
+  req.flash('ok', 'Evento rechazado. El organizador verá el motivo.');
   res.redirect('/admin');
 });
 
@@ -214,7 +242,7 @@ r.post('/productos/:pid/eliminar', loadProduct, (req, res) => {
 });
 
 // ---------- Pagos / pedidos ----------
-r.get('/pedidos', (req, res) => {
+r.get('/pedidos', requireAdmin, (req, res) => {
   const status = ['pending', 'review', 'paid', 'rejected', 'cancelled'].includes(req.query.estado) ? req.query.estado : null;
   const orders = db.prepare(`SELECT o.*, u.name AS user_name, u.phone, e.title AS event_title FROM orders o JOIN users u ON u.id=o.user_id JOIN events e ON e.id=o.event_id
     ${status ? 'WHERE o.status = ?' : ''} ORDER BY CASE o.status WHEN 'review' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END, o.id DESC LIMIT 300`).all(...(status ? [status] : []))
@@ -245,12 +273,12 @@ r.post('/pedidos/:id/eliminar', (req, res) => {
 });
 
 // ---------- Usuarios ----------
-r.get('/usuarios', (req, res) => {
+r.get('/usuarios', requireAdmin, (req, res) => {
   const users = db.prepare(`SELECT u.*, (SELECT COUNT(*) FROM orders WHERE user_id=u.id AND status='paid') AS paid_orders,
     (SELECT COUNT(*) FROM rsvps WHERE user_id=u.id AND status='yes') AS rsvps FROM users u ORDER BY u.name`).all();
   res.render('admin/users', { title: 'Integrantes', users });
 });
-r.post('/usuarios/:id', (req, res) => {
+r.post('/usuarios/:id', requireAdmin, (req, res) => {
   const u = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
   if (!u) return res.redirect('/admin/usuarios');
   const action = req.body.action;
@@ -270,8 +298,8 @@ r.post('/usuarios/:id', (req, res) => {
 });
 
 // ---------- Ajustes ----------
-r.get('/ajustes', (req, res) => res.render('admin/settings', { title: 'Ajustes' }));
-r.post('/ajustes', upload.single('nequi_qr'), csrfCheck, (req, res) => {
+r.get('/ajustes', requireAdmin, (req, res) => res.render('admin/settings', { title: 'Ajustes' }));
+r.post('/ajustes', requireAdmin, upload.single('nequi_qr'), csrfCheck, (req, res) => {
   for (const k of ['site_name', 'family_code', 'nequi_number', 'nequi_holder', 'payment_instructions']) {
     if (req.body[k] !== undefined) settings.set(k, String(req.body[k]).trim());
   }

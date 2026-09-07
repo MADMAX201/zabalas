@@ -42,10 +42,25 @@ const mediaFilter = (req, file, cb) => {
 };
 const uploadMedia = multer({ storage: galleryStorage, fileFilter: mediaFilter, limits: { fileSize: 200 * 1024 * 1024, files: 10 } });
 
+// Admin, o el organizador del evento al que pertenece la ruta (evento, producto, fecha o pedido)
+function requireManager(req, res, next) {
+  if (!req.user) { req.session.returnTo = req.originalUrl; return res.redirect('/login'); }
+  if (req.user.role === 'admin') return next();
+  const { db } = require('./db');
+  const p = req.path; let eventId = null; let mt;
+  if ((mt = p.match(/^\/eventos\/(\d+)(\/|$)/))) eventId = Number(mt[1]);
+  else if ((mt = p.match(/^\/productos\/(\d+)\//))) eventId = (db.prepare('SELECT event_id FROM products WHERE id = ?').get(mt[1]) || {}).event_id;
+  else if ((mt = p.match(/^\/fechas\/(\d+)\//))) eventId = (db.prepare('SELECT event_id FROM event_dates WHERE id = ?').get(mt[1]) || {}).event_id;
+  else if ((mt = p.match(/^\/pedidos\/(\d+)\/(estado|eliminar)$/))) eventId = (db.prepare('SELECT event_id FROM orders WHERE id = ?').get(mt[1]) || {}).event_id;
+  const ev = eventId ? db.prepare('SELECT id, organizer_id FROM events WHERE id = ?').get(eventId) : null;
+  if (ev && ev.organizer_id === req.user.id) { req.isOrganizer = true; res.locals.isOrganizer = true; return next(); }
+  return res.status(403).render('error', { title: 'Sin permiso', message: 'Esta sección es solo para administradores o el organizador del evento.' });
+}
+
 function csrfCheck(req, res, next) {
   const token = req.body && req.body._csrf;
   if (!token || token !== req.session.csrf) return res.status(403).render('error', { title: 'Sesión inválida', message: 'El formulario expiró. Vuelve a intentarlo.' });
   next();
 }
 
-module.exports = { requireLogin, requireAdmin, upload, uploadMedia, csrfCheck };
+module.exports = { requireLogin, requireAdmin, requireManager, upload, uploadMedia, csrfCheck };

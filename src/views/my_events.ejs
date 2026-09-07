@@ -1,0 +1,21 @@
+<%- include('partials/head') %>
+<% const ST = { pending: ['Pendiente de aprobación', 'warn'], approved: ['Aprobado', 'ok'], rejected: ['Rechazado', 'bad'] }; %>
+<div class="row between mb">
+  <div><h1>Mis eventos</h1><p class="muted small">Eventos que organizas. Desde aquí administras fechas, productos, asistencia y pagos.</p></div>
+  <a class="btn" href="/eventos/organizar">＋ Organizar un evento</a>
+</div>
+<% if (!list.length) { %><div class="card center muted">Aún no has organizado ningún evento.</div><% } else { %>
+<div class="card pad0 scroll"><table class="tbl">
+  <tr><th>Evento</th><th>Fecha</th><th>Estado</th><th>Asisten</th><th>Por verificar</th><th>Recaudado</th><th></th></tr>
+  <% list.forEach(e => { %>
+  <tr>
+    <td><b><%= e.title %></b><% if (e.access_code) { %> 🔒<% } %><% if (e.status === 'rejected' && e.reject_reason) { %><br><span class="small" style="color:var(--bad)">Motivo: <%= e.reject_reason %></span><% } %></td>
+    <td><%= h.fmtShort(e.starts_at) %></td>
+    <td><span class="badge <%= ST[e.status][1] %>"><%= ST[e.status][0] %></span></td>
+    <td><%= e.going %></td><td><%= e.review ? `<b>${e.review}</b>` : 0 %></td><td><%= h.fmtCOP(e.paid) %></td>
+    <td class="right"><a class="btn sm" href="/admin/eventos/<%= e.id %>">Administrar</a></td>
+  </tr>
+  <% }) %>
+</table></div>
+<% } %>
+<%- include('partials/foot') %>

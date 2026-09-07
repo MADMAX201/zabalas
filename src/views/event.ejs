@@ -12,11 +12,12 @@
     <% } %>
     <% if (ev.location) { %><p>📍 <%= ev.location %><% if (ev.address) { %> · <a href="https://www.google.com/maps/search/?api=1&query=<%= encodeURIComponent(ev.address) %>" target="_blank" rel="noopener"><%= ev.address %></a><% } %></p><% } %>
     <% if (!ev.published) { %><span class="badge warn">Borrador (solo lo ven administradores)</span><% } %>
+    <% if (ev.status === 'pending') { %><span class="badge warn">Pendiente de aprobación (solo lo ves tú y los administradores)</span><% } else if (ev.status === 'rejected') { %><span class="badge bad">Rechazado</span><% } %>
   </div>
   <div class="row">
     <a class="btn ghost sm" href="/galeria?evento=<%= ev.id %>">📷 Galería</a>
     <a class="btn ghost sm" href="/galeria/subir?evento=<%= ev.id %>">＋ Subir fotos</a>
-    <% if (user.role === 'admin') { %><a class="btn sec sm" href="/admin/eventos/<%= ev.id %>">Administrar</a><% } %>
+    <% if (canManage) { %><a class="btn sec sm" href="/admin/eventos/<%= ev.id %>">Administrar</a><% } %>
   </div>
 </div>
 <% if (ev.description) { %><div class="card mt" style="white-space:pre-line"><%= ev.description %></div><% } %>

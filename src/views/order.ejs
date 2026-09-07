@@ -35,16 +35,16 @@
     <% } else if (o.status === 'cancelled') { %>
       <h2>Pedido cancelado</h2>
     <% } else { %>
-      <h2>Paga por Nequi</h2>
-      <% if (!site.nequi_number) { %>
-        <div class="flash warn">El administrador aún no ha configurado el número de Nequi. Escríbele para coordinar el pago.</div>
+      <h2>Paga por <%= o.pay.method === 'breb' ? 'Bre-B' : 'Nequi' %></h2>
+      <% if (!o.pay.number) { %>
+        <div class="flash warn">El organizador aún no ha configurado dónde recibir el pago. Escríbele para coordinarlo.</div>
       <% } else { %>
       <div class="nequi">
-        <div class="small">Envía <b><%= h.fmtCOP(o.total) %></b> al Nequi</div>
-        <div class="num"><%= site.nequi_number %></div>
-        <% if (site.nequi_holder) { %><div class="small">A nombre de <b><%= site.nequi_holder %></b></div><% } %>
-        <button type="button" class="copy mt" data-copy="<%= site.nequi_number.replace(/\s/g,'') %>">Copiar</button>
-        <% if (site.nequi_qr) { %><div><img src="/uploads/<%= site.nequi_qr %>" alt="QR Nequi"></div><% } %>
+        <div class="small">Envía <b><%= h.fmtCOP(o.total) %></b> <%= o.pay.method === 'breb' ? 'por Bre-B a la llave' : 'al Nequi' %></div>
+        <div class="num" style="<%= o.pay.method === 'breb' ? 'font-size:1.2rem;letter-spacing:.02em;word-break:break-all' : '' %>"><%= o.pay.number %></div>
+        <% if (o.pay.holder) { %><div class="small">A nombre de <b><%= o.pay.holder %></b></div><% } %>
+        <button type="button" class="copy mt" data-copy="<%= o.pay.number.replace(/\s/g,'') %>">Copiar</button>
+        <% if (o.pay.qr) { %><div><img src="/uploads/<%= o.pay.qr %>" alt="QR de pago"></div><% } %>
       </div>
       <% } %>
       <p class="small mt" style="white-space:pre-line"><%= site.payment_instructions %></p>

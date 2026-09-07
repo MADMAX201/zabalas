@@ -36,6 +36,8 @@ app.use((req, res, next) => {
     if (!req.user || !req.user.active) { req.session.destroy(() => {}); req.user = null; }
   }
   res.locals.user = req.user;
+  res.locals.isOrganizerNav = req.user ? !!db.prepare('SELECT 1 FROM events WHERE organizer_id = ? LIMIT 1').get(req.user.id) : false;
+  res.locals.isOrganizer = false; res.locals.canManage = false;
   res.locals.site = settings.all();
   res.locals.h = helpers;
   res.locals.flash = req.session.flash || null;
