@@ -1,0 +1,24 @@
+<%- include('../partials/head') %>
+<p><a href="/admin/eventos/<%= ev.id %>">← <%= ev.title %></a></p>
+<h1><%= title %></h1>
+<div class="card" style="max-width:720px">
+  <% if (error) { %><div class="err"><%= error %></div><% } %>
+  <form method="post" enctype="multipart/form-data">
+    <input type="hidden" name="_csrf" value="<%= csrf %>">
+    <label>Nombre *</label><input type="text" name="name" value="<%= p.name || '' %>" required placeholder="Camiseta oficial 2026">
+    <label>Descripción</label><textarea name="description"><%= p.description || '' %></textarea>
+    <div class="grid two">
+      <div><label>Precio (COP) *</label><input type="number" name="price" value="<%= p.price || '' %>" min="0" step="100" required placeholder="45000"></div>
+      <div><label>Stock (vacío = sin límite)</label><input type="number" name="stock" value="<%= p.stock === null || p.stock === undefined ? '' : p.stock %>" min="0"></div>
+    </div>
+    <label>Tallas (separadas por coma; vacío si no aplica)</label><input type="text" name="sizes" value="<%= p.sizes || '' %>" placeholder="XS,S,M,L,XL,XXL, 4, 6, 8">
+    <div class="help">Puedes mezclar tallas de adulto y niño, p. ej. <code>Niño 6, Niño 8, S, M, L</code>.</div>
+    <label>Fecha límite para pedidos (opcional)</label><input type="datetime-local" name="order_deadline" value="<%= p.order_deadline || '' %>">
+    <label>Foto</label>
+    <% if (p.image) { %><img src="/uploads/<%= p.image %>" style="max-height:120px;border-radius:8px;display:block;margin-bottom:6px" alt=""><label class="check"><input type="checkbox" name="remove_image" value="1"> Quitar foto actual</label><% } %>
+    <input type="file" name="image" accept="image/*">
+    <label class="check"><input type="checkbox" name="active" value="1" <%= p.active ? 'checked' : '' %>> Activo (se puede pedir)</label>
+    <div class="row mt"><button class="btn">Guardar</button><a class="btn ghost" href="/admin/eventos/<%= ev.id %>">Cancelar</a></div>
+  </form>
+</div>
+<%- include('../partials/foot') %>

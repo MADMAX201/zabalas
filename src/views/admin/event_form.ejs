@@ -1,0 +1,27 @@
+<%- include('../partials/head') %>
+<p><a href="/admin">← Administración</a></p>
+<h1><%= title %></h1>
+<div class="card" style="max-width:720px">
+  <% if (error) { %><div class="err"><%= error %></div><% } %>
+  <form method="post" enctype="multipart/form-data">
+    <input type="hidden" name="_csrf" value="<%= csrf %>">
+    <label>Título *</label><input type="text" name="title" value="<%= ev.title || '' %>" required>
+    <label>Descripción</label><textarea name="description"><%= ev.description || '' %></textarea>
+    <div class="grid two">
+      <div><label>Inicio *</label><input type="datetime-local" name="starts_at" value="<%= ev.starts_at || '' %>" required></div>
+      <div><label>Fin (opcional)</label><input type="datetime-local" name="ends_at" value="<%= ev.ends_at || '' %>"></div>
+    </div>
+    <div class="grid two">
+      <div><label>Lugar</label><input type="text" name="location" value="<%= ev.location || '' %>" placeholder="Finca La Esperanza"></div>
+      <div><label>Dirección (abre en Google Maps)</label><input type="text" name="address" value="<%= ev.address || '' %>" placeholder="Km 5 vía Melgar"></div>
+    </div>
+    <label>Fecha límite para confirmar asistencia (opcional)</label><input type="datetime-local" name="rsvp_deadline" value="<%= ev.rsvp_deadline || '' %>">
+    <div class="help">Si se deja vacía, se puede confirmar hasta que termine el evento.</div>
+    <label>Imagen de portada</label>
+    <% if (ev.image) { %><img src="/uploads/<%= ev.image %>" style="max-height:120px;border-radius:8px;display:block;margin-bottom:6px" alt=""><label class="check"><input type="checkbox" name="remove_image" value="1"> Quitar imagen actual</label><% } %>
+    <input type="file" name="image" accept="image/*">
+    <label class="check"><input type="checkbox" name="published" value="1" <%= ev.published ? 'checked' : '' %>> Publicado (visible para la familia)</label>
+    <div class="row mt"><button class="btn">Guardar</button><a class="btn ghost" href="<%= ev.id ? '/admin/eventos/'+ev.id : '/admin' %>">Cancelar</a></div>
+  </form>
+</div>
+<%- include('../partials/foot') %>

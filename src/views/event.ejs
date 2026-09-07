@@ -1,0 +1,118 @@
+<%- include('partials/head') %>
+<% const past = h.isPast(ev.ends_at || ev.starts_at); %>
+<p><a href="/">← Todos los eventos</a></p>
+<% if (ev.image) { %><img class="hero-img" src="/uploads/<%= ev.image %>" alt=""><% } %>
+<div class="row between">
+  <div>
+    <h1><%= ev.title %></h1>
+    <p>📅 <b><%= h.fmtDateTime(ev.starts_at) %></b><% if (ev.ends_at) { %> — <%= h.fmtTime(ev.ends_at) %><% } %></p>
+    <% if (ev.location) { %><p>📍 <%= ev.location %><% if (ev.address) { %> · <a href="https://www.google.com/maps/search/?api=1&query=<%= encodeURIComponent(ev.address) %>" target="_blank" rel="noopener"><%= ev.address %></a><% } %></p><% } %>
+    <% if (!ev.published) { %><span class="badge warn">Borrador (solo lo ven administradores)</span><% } %>
+  </div>
+  <div class="row">
+    <% if (user.role === 'admin') { %><a class="btn sec sm" href="/admin/eventos/<%= ev.id %>">Administrar</a><% } %>
+  </div>
+</div>
+<% if (ev.description) { %><div class="card mt" style="white-space:pre-line"><%= ev.description %></div><% } %>
+
+<div class="grid two mt">
+  <!-- ASISTENCIA -->
+  <div class="card" id="asistencia">
+    <h2>¿Vas a asistir?</h2>
+    <p class="muted small">👥 <%= stats.going %> confirmados<% if (stats.guests) { %> + <%= stats.guests %> acompañantes<% } %><% if (stats.maybe) { %> · <%= stats.maybe %> tal vez<% } %></p>
+    <% if (rsvpClosed) { %>
+      <div class="flash muted">El plazo para confirmar cerró<% if (ev.rsvp_deadline) { %> el <%= h.fmtDateTime(ev.rsvp_deadline) %><% } %>.</div>
+      <% if (myRsvp) { %><p>Tu respuesta: <span class="badge <%= h.RSVP[myRsvp.status].cls %>"><%= h.RSVP[myRsvp.status].label %></span></p><% } %>
+    <% } else { %>
+    <form method="post" action="/eventos/<%= ev.id %>/asistencia" id="rsvpForm">
+      <input type="hidden" name="_csrf" value="<%= csrf %>">
+      <div class="seg">
+        <% for (const s of ['yes','maybe','no']) { %>
+        <label><input type="radio" name="status" value="<%= s %>" <%= myRsvp && myRsvp.status === s ? 'checked' : '' %> required><span><%= s==='yes'?'✅ Sí, voy':s==='maybe'?'🤔 Tal vez':'❌ No puedo' %></span></label>
+        <% } %>
+      </div>
+      <div id="guestsBox" <%= myRsvp && myRsvp.status === 'yes' ? '' : 'hidden' %>>
+        <label for="guests">¿Cuántas personas van contigo? (sin contarte)</label>
+        <input id="guests" type="number" name="guests" min="0" max="20" value="<%= myRsvp ? myRsvp.guests : 0 %>">
+      </div>
+      <label for="note">Nota (opcional)</label>
+      <input id="note" type="text" name="note" maxlength="300" value="<%= myRsvp && myRsvp.note ? myRsvp.note : '' %>" placeholder="Llego tarde, llevo postre...">
+      <% if (ev.rsvp_deadline) { %><div class="help">Puedes cambiar tu respuesta hasta el <%= h.fmtDateTime(ev.rsvp_deadline) %>.</div><% } %>
+      <button class="btn mt"><%= myRsvp ? 'Actualizar respuesta' : 'Confirmar' %></button>
+    </form>
+    <% } %>
+
+    <% if (!past) { %>
+    <h3 class="mt2">Agendar</h3>
+    <div class="row">
+      <a class="btn sec sm" href="/eventos/<%= ev.id %>/calendario.ics">📥 Calendario (iPhone / Outlook)</a>
+      <a class="btn sec sm" href="<%= gcal %>" target="_blank" rel="noopener">📆 Google Calendar</a>
+    </div>
+    <% } %>
+
+    <% if (attendees.length) { %>
+    <h3 class="mt2">Quiénes van</h3>
+    <div class="avatar-list">
+      <% attendees.filter(a => a.status === 'yes').forEach(a => { %><span><%= a.name %><% if (a.guests) { %> +<%= a.guests %><% } %></span><% }) %>
+    </div>
+    <% const maybe = attendees.filter(a => a.status === 'maybe'); if (maybe.length) { %>
+      <p class="small muted mt">Tal vez: <%= maybe.map(a => a.name).join(', ') %></p>
+    <% } %>
+    <% } %>
+  </div>
+
+  <!-- TIENDA -->
+  <div class="card" id="tienda">
+    <h2>Tienda del evento</h2>
+    <% if (!products.length) { %>
+      <p class="muted">Este evento no tiene productos para comprar.</p>
+    <% } else { %>
+    <p class="muted small">Elige talla y cantidad. Después pagas por Nequi y subes el comprobante.</p>
+    <form method="post" action="/eventos/<%= ev.id %>/pedido" id="orderForm">
+      <input type="hidden" name="_csrf" value="<%= csrf %>">
+      <% products.forEach(p => { const left = p.stock === null ? null : Math.max(0, p.stock - p.sold); const closed = p.order_deadline && h.isPast(p.order_deadline); %>
+      <div class="product" data-product="<%= p.id %>" data-price="<%= p.price %>" data-sizes="<%= p.sizeList.join(',') %>" data-name="<%= p.name %>">
+        <% if (p.image) { %><img class="pimg" src="/uploads/<%= p.image %>" alt=""><% } else { %><div class="pimg"></div><% } %>
+        <div>
+          <div class="row between"><h3><%= p.name %></h3><span class="price"><%= h.fmtCOP(p.price) %></span></div>
+          <% if (p.description) { %><p class="small muted" style="white-space:pre-line"><%= p.description %></p><% } %>
+          <% if (closed) { %><span class="badge muted">Pedidos cerrados</span>
+          <% } else if (left === 0) { %><span class="badge bad">Agotado</span>
+          <% } else { %>
+            <% if (left !== null) { %><span class="badge warn">Quedan <%= left %></span><% } %>
+            <% if (p.order_deadline) { %><div class="help">Pedidos hasta el <%= h.fmtDateTime(p.order_deadline) %>.</div><% } %>
+            <div class="lines"></div>
+            <button type="button" class="btn ghost sm mt add-line">+ Agregar<%= p.sizeList.length ? ' talla' : '' %></button>
+          <% } %>
+        </div>
+      </div>
+      <% }) %>
+      <div class="total-bar"><span>Total</span><b id="orderTotal">$0</b></div>
+      <button class="btn block mt" id="orderBtn" disabled>Hacer pedido y ver datos de pago</button>
+    </form>
+    <% } %>
+
+    <% if (myOrders.length) { %>
+    <h3 class="mt2">Mis pedidos en este evento</h3>
+    <table class="tbl">
+      <% myOrders.forEach(o => { %>
+      <tr>
+        <td><a href="/pedidos/<%= o.id %>">#<%= o.id %></a><br><span class="small muted"><%= o.items.map(i => `${i.qty}× ${i.name}${i.size ? ' ('+i.size+')' : ''}`).join(', ') %></span></td>
+        <td class="right"><b><%= h.fmtCOP(o.total) %></b><br><span class="badge <%= h.ORDER_STATUS[o.status].cls %>"><%= h.ORDER_STATUS[o.status].label %></span></td>
+      </tr>
+      <% }) %>
+    </table>
+    <% } %>
+  </div>
+</div>
+
+<template id="lineTpl">
+  <div class="line-item">
+    <div><label>Para quién</label><input type="text" name="item_for" placeholder="Nombre (opcional)" maxlength="80"></div>
+    <div class="sizeBox"><label>Talla</label><select name="item_size"></select></div>
+    <div><label>Cant.</label><input type="number" name="item_qty" min="1" max="50" value="1"></div>
+    <button type="button" class="btn ghost sm rm" title="Quitar">✕</button>
+    <input type="hidden" name="item_product">
+  </div>
+</template>
+<%- include('partials/foot') %>

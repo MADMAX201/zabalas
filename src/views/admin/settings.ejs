@@ -1,0 +1,22 @@
+<%- include('../partials/head') %>
+<h1>Ajustes</h1>
+<%- include('_nav') %>
+<div class="card" style="max-width:720px">
+  <form method="post" enctype="multipart/form-data">
+    <input type="hidden" name="_csrf" value="<%= csrf %>">
+    <h2>Sitio</h2>
+    <label>Nombre del sitio</label><input type="text" name="site_name" value="<%= site.site_name %>" required>
+    <label>Código familiar (para registrarse)</label><input type="text" name="family_code" value="<%= site.family_code %>" required style="text-transform:uppercase">
+    <div class="help">Compártelo solo con la familia. Si se filtra, cámbialo aquí.</div>
+    <h2 class="mt2">Nequi</h2>
+    <label>Número de Nequi (celular)</label><input type="tel" name="nequi_number" value="<%= site.nequi_number %>" placeholder="300 123 4567">
+    <label>A nombre de</label><input type="text" name="nequi_holder" value="<%= site.nequi_holder %>" placeholder="Nombre del titular">
+    <label>Código QR de Nequi (opcional)</label>
+    <% if (site.nequi_qr) { %><img src="/uploads/<%= site.nequi_qr %>" style="max-height:160px;border-radius:8px;display:block;margin-bottom:6px" alt="QR"><label class="check"><input type="checkbox" name="remove_qr" value="1"> Quitar QR</label><% } %>
+    <input type="file" name="nequi_qr" accept="image/*">
+    <div class="help">En la app Nequi: Mi QR → compartir/guardar imagen.</div>
+    <label>Instrucciones de pago</label><textarea name="payment_instructions"><%= site.payment_instructions %></textarea>
+    <button class="btn mt">Guardar ajustes</button>
+  </form>
+</div>
+<%- include('../partials/foot') %>

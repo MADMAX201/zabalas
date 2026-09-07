@@ -1,0 +1,38 @@
+<%- include('../partials/head') %>
+<h1>Administración</h1>
+<%- include('_nav') %>
+<div class="stats mb">
+  <div class="stat"><b><%= stats.users %></b><span>integrantes activos</span></div>
+  <div class="stat"><b><%= stats.events %></b><span>eventos próximos</span></div>
+  <div class="stat"><b><%= stats.review %></b><span>pagos por verificar</span></div>
+  <div class="stat"><b><%= stats.pending %></b><span>pedidos sin pagar</span></div>
+  <div class="stat"><b><%= h.fmtCOP(stats.paidTotal) %></b><span>recaudado total</span></div>
+</div>
+
+<% if (reviewOrders.length) { %>
+<div class="card mb">
+  <h2>🕒 Pagos por verificar</h2>
+  <table class="tbl">
+    <% reviewOrders.forEach(o => { %>
+    <tr><td><a href="/pedidos/<%= o.id %>">#<%= o.id %></a> · <%= o.user_name %><br><span class="small muted"><%= o.event_title %></span></td>
+      <td class="right"><b><%= h.fmtCOP(o.total) %></b></td>
+      <td class="right"><a class="btn sm" href="/admin/pedidos?estado=review">Revisar</a></td></tr>
+    <% }) %>
+  </table>
+</div>
+<% } %>
+
+<div class="row between mb"><h2>Eventos</h2><a class="btn" href="/admin/eventos/nuevo">+ Nuevo evento</a></div>
+<div class="card pad0 scroll"><table class="tbl">
+  <tr><th>Evento</th><th>Fecha</th><th>Asisten</th><th>Pagados</th><th>Por verificar</th><th></th></tr>
+  <% if (!events.length) { %><tr><td colspan="6" class="center muted">Sin eventos todavía.</td></tr><% } %>
+  <% events.forEach(e => { %>
+  <tr>
+    <td><a href="/admin/eventos/<%= e.id %>"><b><%= e.title %></b></a> <% if (!e.published) { %><span class="badge warn">Borrador</span><% } %></td>
+    <td><%= h.fmtShort(e.starts_at) %></td>
+    <td><%= e.going %></td><td><%= e.paid %></td><td><%= e.review ? `<b>${e.review}</b>` : 0 %></td>
+    <td class="right"><a class="btn ghost sm" href="/admin/eventos/<%= e.id %>/editar">Editar</a></td>
+  </tr>
+  <% }) %>
+</table></div>
+<%- include('../partials/foot') %>

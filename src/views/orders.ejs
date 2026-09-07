@@ -1,0 +1,19 @@
+<%- include('partials/head') %>
+<h1>Mis pedidos</h1>
+<% if (!orders.length) { %><div class="card center muted">Aún no has hecho pedidos. Los encuentras dentro de cada <a href="/">evento</a>.</div>
+<% } else { %>
+<div class="card pad0 scroll"><table class="tbl">
+  <tr><th>#</th><th>Evento</th><th>Productos</th><th>Total</th><th>Estado</th></tr>
+  <% orders.forEach(o => { %>
+  <tr>
+    <td><a href="/pedidos/<%= o.id %>">#<%= o.id %></a></td>
+    <td><%= o.event_title %></td>
+    <td class="small"><%= o.items.map(i => `${i.qty}× ${i.name}${i.size ? ' ('+i.size+')' : ''}`).join(', ') %></td>
+    <td><b><%= h.fmtCOP(o.total) %></b></td>
+    <td><span class="badge <%= h.ORDER_STATUS[o.status].cls %>"><%= h.ORDER_STATUS[o.status].label %></span>
+      <% if (o.status === 'pending') { %><br><a class="small" href="/pedidos/<%= o.id %>">Pagar ahora →</a><% } %></td>
+  </tr>
+  <% }) %>
+</table></div>
+<% } %>
+<%- include('partials/foot') %>

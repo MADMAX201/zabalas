@@ -1,0 +1,16 @@
+<%- include('partials/head') %>
+<div class="auth">
+  <div class="card">
+    <h1>Mi perfil</h1>
+    <% if (error) { %><div class="err"><%= error %></div><% } %>
+    <form method="post" action="/perfil">
+      <input type="hidden" name="_csrf" value="<%= csrf %>">
+      <label>Nombre</label><input type="text" name="name" value="<%= user.name %>" required>
+      <label>Correo</label><input type="email" value="<%= user.email %>" disabled>
+      <label>Celular</label><input type="tel" name="phone" value="<%= user.phone || '' %>">
+      <label>Nueva contraseña (déjala vacía para no cambiarla)</label><input type="password" name="password" minlength="6" autocomplete="new-password">
+      <button class="btn block mt">Guardar</button>
+    </form>
+  </div>
+</div>
+<%- include('partials/foot') %>

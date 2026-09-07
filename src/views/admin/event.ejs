@@ -1,0 +1,79 @@
+<%- include('../partials/head') %>
+<p><a href="/admin">← Administración</a></p>
+<div class="row between">
+  <div><h1><%= ev.title %> <% if (!ev.published) { %><span class="badge warn">Borrador</span><% } %></h1><p class="muted"><%= h.fmtDateTime(ev.starts_at) %><% if (ev.location) { %> · <%= ev.location %><% } %></p></div>
+  <div class="row">
+    <a class="btn sec sm" href="/eventos/<%= ev.id %>">Ver como integrante</a>
+    <a class="btn ghost sm" href="/admin/eventos/<%= ev.id %>/editar">Editar</a>
+    <a class="btn sm" href="/admin/eventos/<%= ev.id %>/exportar.xlsx">📊 Exportar Excel</a>
+  </div>
+</div>
+<div class="stats mt mb">
+  <div class="stat"><b><%= totals.yes %><% if (totals.guests) { %> <span style="font-size:1rem">+<%= totals.guests %></span><% } %></b><span>confirmados (+ acompañantes)</span></div>
+  <div class="stat"><b><%= totals.maybe %></b><span>tal vez</span></div>
+  <div class="stat"><b><%= totals.no %></b><span>no asisten</span></div>
+  <div class="stat"><b><%= h.fmtCOP(totals.paid) %></b><span>recaudado</span></div>
+  <div class="stat"><b><%= h.fmtCOP(totals.outstanding) %></b><span>por cobrar</span></div>
+</div>
+
+<div class="card mb" id="productos">
+  <div class="row between"><h2>Productos</h2><a class="btn sm" href="/admin/eventos/<%= ev.id %>/productos/nuevo">+ Producto</a></div>
+  <% if (!products.length) { %><p class="muted">Sin productos. Agrega camisetas, boletas, rifas…</p><% } else { %>
+  <div class="scroll"><table class="tbl">
+    <tr><th>Producto</th><th>Precio</th><th>Tallas</th><th>Pedidas</th><th>Pagadas</th><th>Stock</th><th></th></tr>
+    <% products.forEach(p => { %>
+    <tr>
+      <td><b><%= p.name %></b> <% if (!p.active) { %><span class="badge muted">Inactivo</span><% } %></td>
+      <td><%= h.fmtCOP(p.price) %></td><td class="small"><%= p.sizes || '—' %></td>
+      <td><%= p.sold %></td><td><%= p.paidQty %></td><td><%= p.stock === null ? '∞' : p.stock %></td>
+      <td class="right"><div class="row" style="justify-content:flex-end;gap:4px"><a class="btn ghost sm" href="/admin/productos/<%= p.id %>/editar">Editar</a>
+        <form method="post" action="/admin/productos/<%= p.id %>/eliminar" data-confirm="¿Eliminar este producto?"><input type="hidden" name="_csrf" value="<%= csrf %>"><button class="btn ghost sm">🗑</button></form></div></td>
+    </tr>
+    <% }) %>
+  </table></div>
+  <% if (sizeSummary.length) { %>
+  <details class="mt"><summary>Resumen por talla</summary>
+    <table class="tbl small mt"><tr><th>Producto</th><th>Talla</th><th>Estado</th><th>Cantidad</th></tr>
+    <% sizeSummary.forEach(s => { %><tr><td><%= s.name %></td><td><%= s.size || '—' %></td><td><span class="badge <%= h.ORDER_STATUS[s.status].cls %>"><%= h.ORDER_STATUS[s.status].label %></span></td><td><%= s.qty %></td></tr><% }) %>
+    </table></details>
+  <% } %>
+  <% } %>
+</div>
+
+<div class="card mb" id="pedidos">
+  <h2>Pedidos y pagos</h2>
+  <% if (!orders.length) { %><p class="muted">Aún no hay pedidos.</p><% } else { %>
+  <div class="scroll"><table class="tbl">
+    <tr><th>#</th><th>Integrante</th><th>Productos</th><th>Total</th><th>Estado</th><th>Comprobante</th><th>Acciones</th></tr>
+    <% orders.forEach(o => { %>
+    <tr>
+      <td><a href="/pedidos/<%= o.id %>">#<%= o.id %></a></td>
+      <td><%= o.user_name %><% if (o.phone) { %><br><span class="small muted"><%= o.phone %></span><% } %></td>
+      <td class="small"><%= o.items.map(i => `${i.qty}× ${i.name}${i.size ? ' ('+i.size+')' : ''}${i.for_name ? ' para '+i.for_name : ''}`).join('; ') %></td>
+      <td><b><%= h.fmtCOP(o.total) %></b></td>
+      <td><span class="badge <%= h.ORDER_STATUS[o.status].cls %>"><%= h.ORDER_STATUS[o.status].label %></span></td>
+      <td><% if (o.receipt) { %><a href="/uploads/<%= o.receipt %>" target="_blank">Ver</a><% if (o.receipt_ref) { %><br><span class="small muted"><%= o.receipt_ref %></span><% } %><% } else { %>—<% } %></td>
+      <td><%- include('_order_actions', { o, back: '/admin/eventos/' + ev.id + '#pedidos' }) %></td>
+    </tr>
+    <% }) %>
+  </table></div>
+  <% } %>
+</div>
+
+<div class="card mb" id="asistencia">
+  <h2>Asistencia</h2>
+  <% if (!attendees.length) { %><p class="muted">Nadie ha respondido todavía.</p><% } else { %>
+  <div class="scroll"><table class="tbl">
+    <tr><th>Nombre</th><th>Contacto</th><th>Respuesta</th><th>Acomp.</th><th>Nota</th></tr>
+    <% attendees.forEach(a => { %>
+    <tr><td><%= a.name %></td><td class="small"><%= a.email %><% if (a.phone) { %><br><%= a.phone %><% } %></td>
+      <td><span class="badge <%= h.RSVP[a.status].cls %>"><%= h.RSVP[a.status].label %></span></td><td><%= a.status === 'yes' ? a.guests : '' %></td><td class="small"><%= a.note || '' %></td></tr>
+    <% }) %>
+  </table></div>
+  <% } %>
+</div>
+
+<form method="post" action="/admin/eventos/<%= ev.id %>/eliminar" data-confirm="Se eliminará el evento con sus productos, pedidos y asistencias. ¿Seguro?" class="right">
+  <input type="hidden" name="_csrf" value="<%= csrf %>"><button class="btn bad sm">Eliminar evento</button>
+</form>
+<%- include('../partials/foot') %>

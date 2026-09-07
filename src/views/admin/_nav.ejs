@@ -1,0 +1,6 @@
+<div class="tabs">
+  <a href="/admin" class="<%= path === '/admin' || path.startsWith('/admin/eventos') ? 'on' : '' %>">Eventos</a>
+  <a href="/admin/pedidos" class="<%= path.startsWith('/admin/pedidos') ? 'on' : '' %>">Pagos y pedidos</a>
+  <a href="/admin/usuarios" class="<%= path.startsWith('/admin/usuarios') ? 'on' : '' %>">Integrantes</a>
+  <a href="/admin/ajustes" class="<%= path.startsWith('/admin/ajustes') ? 'on' : '' %>">Ajustes</a>
+</div>

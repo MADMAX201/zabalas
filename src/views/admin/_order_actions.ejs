@@ -1,0 +1,7 @@
+<form method="post" action="/admin/pedidos/<%= o.id %>/estado" class="row" style="gap:6px">
+  <input type="hidden" name="_csrf" value="<%= csrf %>"><input type="hidden" name="back" value="<%= back %>">
+  <input type="text" name="admin_note" placeholder="Nota (opcional)" style="width:160px;padding:6px 8px" maxlength="300">
+  <% if (o.status !== 'paid') { %><button class="btn sm" name="status" value="paid">✅ Confirmar pago</button><% } %>
+  <% if (['review','pending'].includes(o.status)) { %><button class="btn sm bad" name="status" value="rejected">Rechazar</button><% } %>
+  <% if (['paid','rejected','cancelled'].includes(o.status)) { %><button class="btn sm ghost" name="status" value="pending">Volver a pendiente</button><% } %>
+</form>

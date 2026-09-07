@@ -1,0 +1,44 @@
+<%- include('partials/head') %>
+<div class="row between mb">
+  <div>
+    <h1>Hola, <%= user.name.split(' ')[0] %> 👋</h1>
+    <p class="muted">Estos son los próximos encuentros de la familia.</p>
+  </div>
+  <% if (user.role === 'admin') { %><a class="btn" href="/admin/eventos/nuevo">+ Nuevo evento</a><% } %>
+</div>
+
+<% if (pendingOrders) { %>
+<div class="flash info">Tienes <%= pendingOrders %> pedido<%= pendingOrders > 1 ? 's' : '' %> pendiente<%= pendingOrders > 1 ? 's' : '' %> de pago. <a href="/pedidos">Ver mis pedidos</a></div>
+<% } %>
+
+<% const card = (e) => { const d = h.parseLocal(e.starts_at); %>
+  <a class="card event-card" href="/eventos/<%= e.id %>">
+    <div class="img"><% if (e.image) { %><img src="/uploads/<%= e.image %>" alt=""><% } %></div>
+    <div class="body">
+      <div class="row between">
+        <div class="date-chip"><b><%= d.getDate() %></b><span><%= h.fmtShort(e.starts_at).split(' ')[1] %></span></div>
+        <% if (myRsvps[e.id]) { %><span class="badge <%= h.RSVP[myRsvps[e.id]].cls %>"><%= h.RSVP[myRsvps[e.id]].label %></span>
+        <% } else if (!h.isPast(e.ends_at || e.starts_at)) { %><span class="badge warn">Sin confirmar</span><% } %>
+      </div>
+      <h2><%= e.title %></h2>
+      <div class="muted small"><%= h.fmtDateTime(e.starts_at) %><% if (e.location) { %> · <%= e.location %><% } %></div>
+      <div class="row small muted" style="margin-top:auto">
+        <span>👥 <%= e.stats.going + e.stats.guests %> asistirán</span>
+        <% if (e.stats.products) { %><span>🛍️ <%= e.stats.products %> producto<%= e.stats.products > 1 ? 's' : '' %></span><% } %>
+      </div>
+    </div>
+  </a>
+<% }; %>
+
+<h2 class="mt">Próximos eventos</h2>
+<% if (!upcoming.length) { %>
+  <div class="card center muted">Aún no hay eventos programados.<% if (user.role === 'admin') { %> <a href="/admin/eventos/nuevo">Crea el primero</a>.<% } %></div>
+<% } else { %>
+  <div class="grid"><% upcoming.forEach(card) %></div>
+<% } %>
+
+<% if (past.length) { %>
+  <h2 class="mt2">Eventos pasados</h2>
+  <div class="grid"><% past.forEach(card) %></div>
+<% } %>
+<%- include('partials/foot') %>
