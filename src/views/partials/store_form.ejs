@@ -1,0 +1,32 @@
+<%# Formulario de tienda reutilizable: products, action, prefill (array de items), submitLabel, editingOrderId %>
+<form method="post" action="<%= action %>" id="orderForm" data-prefill='<%- JSON.stringify(prefill || []).replace(/'/g, "&#39;") %>'>
+  <input type="hidden" name="_csrf" value="<%= csrf %>">
+  <% products.forEach(p => { const left = p.stock === null ? null : Math.max(0, p.stock - p.sold); const closed = p.order_deadline && h.isPast(p.order_deadline); %>
+  <div class="product" data-product="<%= p.id %>" data-price="<%= p.price %>" data-sizes="<%= p.sizeList.join(',') %>" data-name="<%= p.name %>">
+    <% if (p.image) { %><img class="pimg" src="/uploads/<%= p.image %>" alt=""><% } else { %><div class="pimg"></div><% } %>
+    <div>
+      <div class="row between"><h3><%= p.name %></h3><span class="price"><%= h.fmtCOP(p.price) %></span></div>
+      <% if (p.description) { %><p class="small muted" style="white-space:pre-line"><%= p.description %></p><% } %>
+      <% if (closed) { %><span class="badge muted">Pedidos cerrados</span>
+      <% } else if (left === 0) { %><span class="badge bad">Agotado</span>
+      <% } else { %>
+        <% if (left !== null) { %><span class="badge warn">Quedan <%= left %></span><% } %>
+        <% if (p.order_deadline) { %><div class="help">Pedidos hasta el <%= h.fmtDateTime(p.order_deadline) %>.</div><% } %>
+        <div class="lines"></div>
+        <button type="button" class="btn ghost sm mt add-line">+ Agregar<%= p.sizeList.length ? ' talla' : '' %></button>
+      <% } %>
+    </div>
+  </div>
+  <% }) %>
+  <div class="total-bar"><span>Total</span><b id="orderTotal">$0</b></div>
+  <button class="btn block mt" id="orderBtn" disabled><%= submitLabel %></button>
+</form>
+<template id="lineTpl">
+  <div class="line-item">
+    <div><label>Para quién</label><input type="text" name="item_for" placeholder="Nombre (opcional)" maxlength="80"></div>
+    <div class="sizeBox"><label>Talla</label><select name="item_size"></select></div>
+    <div><label>Cant.</label><input type="number" name="item_qty" min="1" max="50" value="1"></div>
+    <button type="button" class="btn ghost sm rm" title="Quitar">✕</button>
+    <input type="hidden" name="item_product">
+  </div>
+</template>

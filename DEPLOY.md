@@ -44,6 +44,15 @@ sudo certbot --nginx -d zabalas.online -d www.zabalas.online
 
 Abre https://zabalas.online → ingresa con el admin del `.env` → Admin > Ajustes (QR de Nequi, código familiar).
 
+## 4b. Si ya existía el bloque de Nginx (actualización a v1.3+)
+
+La galería acepta videos de hasta 200 MB, así que el bloque necesita `client_max_body_size 210m`. Vuelve a copiar el archivo (certbot ya habrá agregado el bloque 443; edítalo en vez de sobrescribir si es tu caso):
+
+```bash
+sudo sed -i 's/client_max_body_size 10m;/client_max_body_size 210m;\n    proxy_read_timeout 300s;/' /etc/nginx/sites-available/zabalas.online
+sudo nginx -t && sudo systemctl reload nginx
+```
+
 ## 5. Actualizar
 
 ```bash

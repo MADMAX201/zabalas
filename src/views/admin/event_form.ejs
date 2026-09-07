@@ -21,6 +21,13 @@
     <% if (ev.image) { %><img src="/uploads/<%= ev.image %>" style="max-height:120px;border-radius:8px;display:block;margin-bottom:6px" alt=""><label class="check"><input type="checkbox" name="remove_image" value="1"> Quitar imagen actual</label><% } %>
     <input type="file" name="image" accept="image/*">
     <label class="check"><input type="checkbox" name="published" value="1" <%= ev.published ? 'checked' : '' %>> Publicado (visible para la familia)</label>
+    <label class="check"><input type="checkbox" name="is_private" value="1" id="isPrivate" <%= ev.access_code ? 'checked' : '' %>> 🔒 Evento privado (solo con código de invitación)</label>
+    <div id="codeBox" <%= ev.access_code ? '' : 'hidden' %>>
+      <label>Código de invitación</label>
+      <input type="text" name="access_code" value="<%= ev.access_code || '' %>" placeholder="Se genera solo si lo dejas vacío" maxlength="20" style="text-transform:uppercase;max-width:260px">
+      <div class="help">Solo verán este evento quienes ingresen el código. Compártelo junto con el enlace del evento.</div>
+    </div>
+    <script>document.getElementById('isPrivate').addEventListener('change', e => { document.getElementById('codeBox').hidden = !e.target.checked; });</script>
     <div class="row mt"><button class="btn">Guardar</button><a class="btn ghost" href="<%= ev.id ? '/admin/eventos/'+ev.id : '/admin' %>">Cancelar</a></div>
   </form>
 </div>

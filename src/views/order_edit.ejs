@@ -1,0 +1,9 @@
+<%- include('partials/head') %>
+<p><a href="/pedidos/<%= o.id %>">← Pedido #<%= o.id %></a></p>
+<h1>Editar pedido #<%= o.id %></h1>
+<p class="muted"><%= o.event_title %> · <span class="badge warn">Pendiente de pago</span></p>
+<div class="card" style="max-width:720px">
+  <p class="muted small">Ajusta tallas, cantidades o quita líneas. Al guardar se recalcula el total y podrás pagar.</p>
+  <%- include('partials/store_form', { products, action: '/pedidos/' + o.id + '/editar', prefill: o.items.map(i => ({ product_id: i.product_id, size: i.size, qty: i.qty, for_name: i.for_name })), submitLabel: 'Guardar cambios y pagar' }) %>
+</div>
+<%- include('partials/foot') %>

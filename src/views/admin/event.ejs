@@ -8,6 +8,16 @@
     <a class="btn sm" href="/admin/eventos/<%= ev.id %>/exportar.xlsx">📊 Exportar Excel</a>
   </div>
 </div>
+<% if (ev.access_code) { %>
+<div class="card mt" style="background:var(--warn-bg);border-color:#f0d9b5">
+  <div class="row between">
+    <div>🔒 <b>Evento privado.</b> Código de invitación: <b style="font-size:1.3rem;letter-spacing:.12em"><%= ev.access_code %></b>
+      <button type="button" class="copy" data-copy="<%= ev.access_code %>">Copiar</button></div>
+    <div class="small">Enlace: <code><%= site.site_url || 'https://zabalas.online' %>/eventos/<%= ev.id %></code></div>
+  </div>
+  <p class="small muted" style="margin:6px 0 0">Admitidos con código (<%= admitted.length %>): <%= admitted.map(x => x.name).join(', ') || 'nadie todavía' %></p>
+</div>
+<% } %>
 <div class="stats mt mb">
   <div class="stat"><b><%= totals.yes %><% if (totals.guests) { %> <span style="font-size:1rem">+<%= totals.guests %></span><% } %></b><span>confirmados (+ acompañantes)</span></div>
   <div class="stat"><b><%= totals.maybe %></b><span>tal vez</span></div>

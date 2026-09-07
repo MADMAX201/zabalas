@@ -91,6 +91,32 @@ CREATE TABLE IF NOT EXISTS order_items (
 );
 `);
 
+// ---- Migraciones incrementales ----
+const cols = (t) => db.prepare(`PRAGMA table_info(${t})`).all().map(c => c.name);
+if (!cols('events').includes('access_code')) db.exec('ALTER TABLE events ADD COLUMN access_code TEXT');
+db.exec(`
+CREATE TABLE IF NOT EXISTS event_access (
+  event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  granted_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  PRIMARY KEY (event_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS media (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  event_id INTEGER REFERENCES events(id) ON DELETE SET NULL,
+  kind TEXT NOT NULL,                         -- image | video
+  file TEXT NOT NULL,                         -- nombre en uploads/galeria
+  thumb TEXT,                                 -- miniatura (imágenes)
+  caption TEXT,
+  visibility TEXT NOT NULL DEFAULT 'family',  -- family | private
+  size INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_media_vis ON media(visibility, created_at);
+`);
+fs.mkdirSync(path.join(DATA_DIR, 'uploads', 'galeria'), { recursive: true });
+
 // ---- Ajustes por defecto ----
 const defaults = {
   family_code: process.env.FAMILY_CODE || 'ZABALA2026',

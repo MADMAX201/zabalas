@@ -1,0 +1,39 @@
+<%- include('partials/head') %>
+<div class="row between mb">
+  <div>
+    <h1><%= mine ? 'Mi galería' : 'Galería de la familia' %></h1>
+    <p class="muted small"><%= mine ? 'Todo lo que has subido, privado o compartido.' : 'Fotos y videos que la familia ha compartido.' %></p>
+  </div>
+  <a class="btn" href="/galeria/subir<%= eventId ? '?evento=' + eventId : '' %>">＋ Subir fotos o videos</a>
+</div>
+<div class="tabs">
+  <a href="/galeria" class="<%= !mine ? 'on' : '' %>">👨‍👩‍👧 Familia</a>
+  <a href="/galeria/mia" class="<%= mine ? 'on' : '' %>">🙋 Mías (<%= counts.mine %>)</a>
+</div>
+<% if (!mine && events.length) { %>
+<form method="get" action="/galeria" class="row mb">
+  <select name="evento" onchange="this.form.submit()" style="max-width:320px">
+    <option value="">Todos los eventos</option>
+    <% events.forEach(e => { %><option value="<%= e.id %>" <%= eventId === e.id ? 'selected' : '' %>><%= e.title %> (<%= h.fmtShort(e.starts_at) %>)</option><% }) %>
+  </select>
+</form>
+<% } %>
+<% if (!items.length) { %>
+  <div class="card center muted">Todavía no hay nada aquí. <a href="/galeria/subir">Sube la primera foto</a>.</div>
+<% } else { %>
+<div class="gal">
+  <% items.forEach(m => { %>
+  <a class="gal-item" href="/galeria/<%= m.id %><%= mine ? '?de=mia' : '' %>" title="<%= m.caption || '' %>">
+    <% if (m.kind === 'image') { %>
+      <img src="/uploads/galeria/<%= m.thumb || m.file %>" alt="<%= m.caption || '' %>" loading="lazy">
+    <% } else { %>
+      <video src="/uploads/galeria/<%= m.file %>#t=0.5" preload="metadata" muted playsinline></video>
+      <span class="gal-play">▶</span>
+    <% } %>
+    <% if (mine && m.visibility === 'private') { %><span class="gal-lock">🔒</span><% } %>
+    <span class="gal-meta"><%= mine ? (m.event_title || '') : m.user_name.split(' ')[0] %></span>
+  </a>
+  <% }) %>
+</div>
+<% } %>
+<%- include('partials/foot') %>

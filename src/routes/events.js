@@ -16,8 +16,10 @@ const eventStats = db.prepare(`
 // Inicio: próximos eventos + pasados
 r.get('/', requireLogin, (req, res) => {
   const now = h.nowLocalISO();
-  const upcoming = db.prepare('SELECT * FROM events WHERE published = 1 AND COALESCE(ends_at, starts_at) >= ? ORDER BY starts_at ASC').all(now);
-  const past = db.prepare('SELECT * FROM events WHERE published = 1 AND COALESCE(ends_at, starts_at) < ? ORDER BY starts_at DESC LIMIT 12').all(now);
+  // Eventos privados: solo se listan si el integrante ya ingresó el código (o es admin)
+  const vis = req.user.role === 'admin' ? '' : `AND (access_code IS NULL OR access_code = '' OR id IN (SELECT event_id FROM event_access WHERE user_id = ${req.user.id}))`;
+  const upcoming = db.prepare(`SELECT * FROM events WHERE published = 1 ${vis} AND COALESCE(ends_at, starts_at) >= ? ORDER BY starts_at ASC`).all(now);
+  const past = db.prepare(`SELECT * FROM events WHERE published = 1 ${vis} AND COALESCE(ends_at, starts_at) < ? ORDER BY starts_at DESC LIMIT 12`).all(now);
   const myRsvps = {};
   for (const x of db.prepare('SELECT event_id, status FROM rsvps WHERE user_id = ?').all(req.user.id)) myRsvps[x.event_id] = x.status;
   const pendingOrders = db.prepare("SELECT COUNT(*) AS n FROM orders WHERE user_id = ? AND status = 'pending'").get(req.user.id).n;
@@ -25,11 +27,39 @@ r.get('/', requireLogin, (req, res) => {
   res.render('home', { title: 'Eventos', upcoming: withStats(upcoming), past: withStats(past), myRsvps, pendingOrders });
 });
 
+function hasAccess(ev, user) {
+  if (!ev.access_code || user.role === 'admin') return true;
+  return !!db.prepare('SELECT 1 FROM event_access WHERE event_id = ? AND user_id = ?').get(ev.id, user.id);
+}
 function loadEvent(req, res, next) {
   const ev = db.prepare('SELECT * FROM events WHERE id = ?').get(req.params.id);
   if (!ev || (!ev.published && req.user.role !== 'admin')) return res.status(404).render('error', { title: 'No encontrado', message: 'Este evento no existe.' });
+  if (!hasAccess(ev, req.user)) return res.status(403).render('event_locked', { title: 'Evento privado', ev, error: null });
   req.event = ev; next();
 }
+
+// Ingresar código de un evento privado
+r.post('/eventos/:id/codigo', requireLogin, (req, res) => {
+  const ev = db.prepare('SELECT * FROM events WHERE id = ? AND published = 1').get(req.params.id);
+  if (!ev) return res.status(404).render('error', { title: 'No encontrado', message: 'Este evento no existe.' });
+  const code = String(req.body.code || '').trim().toUpperCase();
+  if (!ev.access_code || code !== ev.access_code.toUpperCase()) {
+    return res.status(403).render('event_locked', { title: 'Evento privado', ev, error: 'El código no es correcto. Pídeselo a quien te invitó.' });
+  }
+  db.prepare('INSERT OR IGNORE INTO event_access (event_id, user_id) VALUES (?, ?)').run(ev.id, req.user.id);
+  req.flash('ok', `¡Bienvenido/a a "${ev.title}"!`);
+  res.redirect(`/eventos/${ev.id}`);
+});
+
+// Buscar evento privado por código (desde el inicio)
+r.post('/eventos/codigo', requireLogin, (req, res) => {
+  const code = String(req.body.code || '').trim().toUpperCase();
+  const ev = code ? db.prepare('SELECT * FROM events WHERE published = 1 AND UPPER(access_code) = ?').get(code) : null;
+  if (!ev) { req.flash('bad', 'No hay ningún evento con ese código.'); return res.redirect('/'); }
+  db.prepare('INSERT OR IGNORE INTO event_access (event_id, user_id) VALUES (?, ?)').run(ev.id, req.user.id);
+  req.flash('ok', `¡Bienvenido/a a "${ev.title}"!`);
+  res.redirect(`/eventos/${ev.id}`);
+});
 
 r.get('/eventos/:id', requireLogin, loadEvent, (req, res) => {
   const ev = req.event;

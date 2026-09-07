@@ -16,7 +16,9 @@ app.set('views', path.join(__dirname, 'views'));
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, '..', 'public'), { maxAge: '1d' }));
-app.use('/uploads', express.static(path.join(DATA_DIR, 'uploads'), { maxAge: '7d' }));
+// Comprobantes e imágenes públicas del sitio; la galería se sirve desde routes/gallery.js (control de privacidad)
+const uploadsStatic = express.static(path.join(DATA_DIR, 'uploads'), { maxAge: '7d' });
+app.use('/uploads', (req, res, next) => req.path.startsWith('/galeria/') ? next() : uploadsStatic(req, res, next));
 
 app.use(session({
   store: new SqliteStore({ client: db, expired: { clear: true, intervalMs: 15 * 60 * 1000 } }),
@@ -55,12 +57,13 @@ app.use((req, res, next) => {
 app.use(require('./routes/auth'));
 app.use(require('./routes/events'));
 app.use(require('./routes/orders'));
+app.use(require('./routes/gallery'));
 app.use('/admin', require('./routes/admin'));
 
 app.use((req, res) => res.status(404).render('error', { title: 'No encontrado', message: 'Esta página no existe.' }));
 app.use((err, req, res, next) => {
   console.error(err);
-  const msg = err.code === 'LIMIT_FILE_SIZE' ? 'El archivo es demasiado grande (máx. 8 MB).' : (err.publicMessage || 'Ocurrió un error inesperado.');
+  const msg = err.code === 'LIMIT_FILE_SIZE' ? 'El archivo es demasiado grande (máx. 8 MB en comprobantes e imágenes, 200 MB en la galería).' : (err.publicMessage || 'Ocurrió un error inesperado.');
   res.status(err.status || 500).render('error', { title: 'Error', message: msg });
 });
 

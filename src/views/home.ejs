@@ -20,7 +20,7 @@
         <% if (myRsvps[e.id]) { %><span class="badge <%= h.RSVP[myRsvps[e.id]].cls %>"><%= h.RSVP[myRsvps[e.id]].label %></span>
         <% } else if (!h.isPast(e.ends_at || e.starts_at)) { %><span class="badge warn">Sin confirmar</span><% } %>
       </div>
-      <h2><%= e.title %></h2>
+      <h2><%= e.title %><% if (e.access_code) { %> <span class="badge muted" title="Evento privado">🔒</span><% } %></h2>
       <div class="muted small"><%= h.fmtDateTime(e.starts_at) %><% if (e.location) { %> · <%= e.location %><% } %></div>
       <div class="row small muted" style="margin-top:auto">
         <span>👥 <%= e.stats.going + e.stats.guests %> asistirán</span>
@@ -36,6 +36,15 @@
 <% } else { %>
   <div class="grid"><% upcoming.forEach(card) %></div>
 <% } %>
+
+<details class="card mt2" style="padding:14px 18px">
+  <summary>🔒 ¿Te invitaron a un evento privado? Ingresa el código</summary>
+  <form method="post" action="/eventos/codigo" class="row mt">
+    <input type="hidden" name="_csrf" value="<%= csrf %>">
+    <input type="text" name="code" placeholder="CÓDIGO" required autocapitalize="characters" style="text-transform:uppercase;max-width:220px">
+    <button class="btn">Entrar</button>
+  </form>
+</details>
 
 <% if (past.length) { %>
   <h2 class="mt2">Eventos pasados</h2>

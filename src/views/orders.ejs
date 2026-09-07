@@ -11,7 +11,7 @@
     <td class="small"><%= o.items.map(i => `${i.qty}× ${i.name}${i.size ? ' ('+i.size+')' : ''}`).join(', ') %></td>
     <td><b><%= h.fmtCOP(o.total) %></b></td>
     <td><span class="badge <%= h.ORDER_STATUS[o.status].cls %>"><%= h.ORDER_STATUS[o.status].label %></span>
-      <% if (o.status === 'pending') { %><br><a class="small" href="/pedidos/<%= o.id %>">Pagar ahora →</a><% } %></td>
+      <% if (o.status === 'pending') { %><br><a class="small" href="/pedidos/<%= o.id %>">Pagar ahora →</a> · <a class="small" href="/pedidos/<%= o.id %>/editar">Editar</a><% } %></td>
   </tr>
   <% }) %>
 </table></div>

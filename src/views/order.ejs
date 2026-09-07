@@ -16,7 +16,10 @@
     <p class="small muted">Creado el <%= h.fmtDateTime(o.created_at.replace(' ', 'T').slice(0,16)) %></p>
     <% if (o.admin_note) { %><div class="flash <%= o.status === 'rejected' ? 'bad' : 'info' %>">Mensaje del administrador: <%= o.admin_note %></div><% } %>
     <% if (o.status === 'pending') { %>
-    <form method="post" action="/pedidos/<%= o.id %>/cancelar" data-confirm="¿Cancelar este pedido?"><input type="hidden" name="_csrf" value="<%= csrf %>"><button class="btn ghost sm">Cancelar pedido</button></form>
+    <div class="row" style="gap:8px">
+      <a class="btn sec sm" href="/pedidos/<%= o.id %>/editar">✏️ Editar pedido</a>
+      <form method="post" action="/pedidos/<%= o.id %>/cancelar" data-confirm="¿Cancelar este pedido?"><input type="hidden" name="_csrf" value="<%= csrf %>"><button class="btn ghost sm">Cancelar pedido</button></form>
+    </div>
     <% } %>
   </div>
 

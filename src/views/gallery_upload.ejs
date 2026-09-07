@@ -1,0 +1,40 @@
+<%- include('partials/head') %>
+<p><a href="/galeria">← Galería</a></p>
+<h1>Subir fotos o videos</h1>
+<div class="card" style="max-width:640px">
+  <form method="post" action="/galeria/subir" enctype="multipart/form-data" id="upForm">
+    <input type="hidden" name="_csrf" value="<%= csrf %>">
+    <label for="files">Archivos (hasta 10 a la vez, máx. 200 MB cada uno)</label>
+    <input id="files" type="file" name="files" accept="image/*,video/*" multiple required>
+    <div id="preview" class="gal mt" style="grid-template-columns:repeat(auto-fill,minmax(90px,1fr))"></div>
+    <label for="caption">Descripción (opcional)</label>
+    <input id="caption" type="text" name="caption" maxlength="300" placeholder="Paseo a la finca, diciembre 2026">
+    <label for="event_id">Evento (opcional)</label>
+    <select id="event_id" name="event_id">
+      <option value="">Sin evento</option>
+      <% events.forEach(e => { %><option value="<%= e.id %>" <%= eventId === e.id ? 'selected' : '' %>><%= e.title %> (<%= h.fmtShort(e.starts_at) %>)</option><% }) %>
+    </select>
+    <label>¿Quién puede verlo?</label>
+    <div class="seg">
+      <label><input type="radio" name="visibility" value="family" checked><span>👨‍👩‍👧 Toda la familia</span></label>
+      <label><input type="radio" name="visibility" value="private"><span>🔒 Solo yo</span></label>
+    </div>
+    <div class="help">Puedes cambiarlo después desde cada foto.</div>
+    <button class="btn block mt" id="upBtn">Subir</button>
+    <p class="small muted center mt" id="upMsg" hidden>Subiendo… no cierres esta página.</p>
+  </form>
+</div>
+<script>
+  const inp = document.getElementById('files'), prev = document.getElementById('preview');
+  inp.addEventListener('change', () => {
+    prev.innerHTML = '';
+    [...inp.files].slice(0, 10).forEach(f => {
+      const d = document.createElement('div'); d.className = 'gal-item';
+      if (f.type.startsWith('image/')) { const i = document.createElement('img'); i.src = URL.createObjectURL(f); d.appendChild(i); }
+      else { d.innerHTML = '<span class="gal-play">▶</span>'; }
+      prev.appendChild(d);
+    });
+  });
+  document.getElementById('upForm').addEventListener('submit', () => { document.getElementById('upBtn').disabled = true; document.getElementById('upMsg').hidden = false; });
+</script>
+<%- include('partials/foot') %>

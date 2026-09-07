@@ -4,12 +4,14 @@
 <% if (ev.image) { %><img class="hero-img" src="/uploads/<%= ev.image %>" alt=""><% } %>
 <div class="row between">
   <div>
-    <h1><%= ev.title %></h1>
+    <h1><%= ev.title %><% if (ev.access_code) { %> <span class="badge muted">🔒 Privado</span><% } %></h1>
     <p>📅 <b><%= h.fmtDateTime(ev.starts_at) %></b><% if (ev.ends_at) { %> — <%= h.fmtTime(ev.ends_at) %><% } %></p>
     <% if (ev.location) { %><p>📍 <%= ev.location %><% if (ev.address) { %> · <a href="https://www.google.com/maps/search/?api=1&query=<%= encodeURIComponent(ev.address) %>" target="_blank" rel="noopener"><%= ev.address %></a><% } %></p><% } %>
     <% if (!ev.published) { %><span class="badge warn">Borrador (solo lo ven administradores)</span><% } %>
   </div>
   <div class="row">
+    <a class="btn ghost sm" href="/galeria?evento=<%= ev.id %>">📷 Galería</a>
+    <a class="btn ghost sm" href="/galeria/subir?evento=<%= ev.id %>">＋ Subir fotos</a>
     <% if (user.role === 'admin') { %><a class="btn sec sm" href="/admin/eventos/<%= ev.id %>">Administrar</a><% } %>
   </div>
 </div>
@@ -67,29 +69,20 @@
     <% if (!products.length) { %>
       <p class="muted">Este evento no tiene productos para comprar.</p>
     <% } else { %>
-    <p class="muted small">Elige talla y cantidad. Después pagas por Nequi y subes el comprobante.</p>
-    <form method="post" action="/eventos/<%= ev.id %>/pedido" id="orderForm">
-      <input type="hidden" name="_csrf" value="<%= csrf %>">
-      <% products.forEach(p => { const left = p.stock === null ? null : Math.max(0, p.stock - p.sold); const closed = p.order_deadline && h.isPast(p.order_deadline); %>
-      <div class="product" data-product="<%= p.id %>" data-price="<%= p.price %>" data-sizes="<%= p.sizeList.join(',') %>" data-name="<%= p.name %>">
-        <% if (p.image) { %><img class="pimg" src="/uploads/<%= p.image %>" alt=""><% } else { %><div class="pimg"></div><% } %>
-        <div>
-          <div class="row between"><h3><%= p.name %></h3><span class="price"><%= h.fmtCOP(p.price) %></span></div>
-          <% if (p.description) { %><p class="small muted" style="white-space:pre-line"><%= p.description %></p><% } %>
-          <% if (closed) { %><span class="badge muted">Pedidos cerrados</span>
-          <% } else if (left === 0) { %><span class="badge bad">Agotado</span>
-          <% } else { %>
-            <% if (left !== null) { %><span class="badge warn">Quedan <%= left %></span><% } %>
-            <% if (p.order_deadline) { %><div class="help">Pedidos hasta el <%= h.fmtDateTime(p.order_deadline) %>.</div><% } %>
-            <div class="lines"></div>
-            <button type="button" class="btn ghost sm mt add-line">+ Agregar<%= p.sizeList.length ? ' talla' : '' %></button>
-          <% } %>
-        </div>
+    <% const pendingOrder = myOrders.find(o => o.status === 'pending'); %>
+    <% if (pendingOrder) { %>
+    <div class="flash warn">
+      Tienes el <b>pedido #<%= pendingOrder.id %></b> sin pagar (<%= h.fmtCOP(pendingOrder.total) %>).
+      <div class="row mt" style="gap:8px">
+        <a class="btn sm" href="/pedidos/<%= pendingOrder.id %>">💸 Pagar ahora</a>
+        <a class="btn sm sec" href="/pedidos/<%= pendingOrder.id %>/editar">✏️ Cambiar tallas o cantidades</a>
       </div>
-      <% }) %>
-      <div class="total-bar"><span>Total</span><b id="orderTotal">$0</b></div>
-      <button class="btn block mt" id="orderBtn" disabled>Hacer pedido y ver datos de pago</button>
-    </form>
+    </div>
+    <details><summary class="muted small" style="cursor:pointer">¿Necesitas hacer otro pedido aparte?</summary>
+    <% } %>
+    <p class="muted small mt">Elige talla y cantidad. Después pagas por Nequi y subes el comprobante.</p>
+    <%- include('partials/store_form', { products, action: '/eventos/' + ev.id + '/pedido', prefill: [], submitLabel: 'Hacer pedido y ver datos de pago' }) %>
+    <% if (pendingOrder) { %></details><% } %>
     <% } %>
 
     <% if (myOrders.length) { %>
@@ -100,19 +93,20 @@
         <td><a href="/pedidos/<%= o.id %>">#<%= o.id %></a><br><span class="small muted"><%= o.items.map(i => `${i.qty}× ${i.name}${i.size ? ' ('+i.size+')' : ''}`).join(', ') %></span></td>
         <td class="right"><b><%= h.fmtCOP(o.total) %></b><br><span class="badge <%= h.ORDER_STATUS[o.status].cls %>"><%= h.ORDER_STATUS[o.status].label %></span></td>
       </tr>
+      <% if (o.status === 'pending') { %>
+      <tr><td colspan="2" style="padding-top:0;border-bottom:1px solid var(--line)">
+        <div class="row" style="gap:8px">
+          <a class="btn sm" href="/pedidos/<%= o.id %>">💸 Retomar pago</a>
+          <a class="btn sm sec" href="/pedidos/<%= o.id %>/editar">✏️ Editar pedido</a>
+        </div>
+      </td></tr>
+      <% } else if (o.status === 'rejected') { %>
+      <tr><td colspan="2" style="padding-top:0"><a class="btn sm warn" href="/pedidos/<%= o.id %>">Subir otro comprobante</a></td></tr>
+      <% } %>
       <% }) %>
     </table>
     <% } %>
   </div>
 </div>
 
-<template id="lineTpl">
-  <div class="line-item">
-    <div><label>Para quién</label><input type="text" name="item_for" placeholder="Nombre (opcional)" maxlength="80"></div>
-    <div class="sizeBox"><label>Talla</label><select name="item_size"></select></div>
-    <div><label>Cant.</label><input type="number" name="item_qty" min="1" max="50" value="1"></div>
-    <button type="button" class="btn ghost sm rm" title="Quitar">✕</button>
-    <input type="hidden" name="item_product">
-  </div>
-</template>
 <%- include('partials/foot') %>

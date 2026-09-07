@@ -1,0 +1,15 @@
+<%- include('partials/head') %>
+<div class="auth"><div class="card">
+  <h1 class="center">🔒 Evento privado</h1>
+  <p class="center muted"><b><%= ev.title %></b><br><%= h.fmtDateTime(ev.starts_at) %></p>
+  <p class="center small">Este evento es solo para invitados. Ingresa el código que te compartieron.</p>
+  <% if (error) { %><div class="err"><%= error %></div><% } %>
+  <form method="post" action="/eventos/<%= ev.id %>/codigo">
+    <input type="hidden" name="_csrf" value="<%= csrf %>">
+    <label for="code">Código del evento</label>
+    <input id="code" type="text" name="code" required autocapitalize="characters" style="text-transform:uppercase;font-size:1.3rem;letter-spacing:.15em;text-align:center" autofocus>
+    <button class="btn block mt">Entrar al evento</button>
+  </form>
+  <p class="center mt"><a href="/">← Volver a los eventos</a></p>
+</div></div>
+<%- include('partials/foot') %>

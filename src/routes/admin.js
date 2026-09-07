@@ -42,14 +42,20 @@ const eventForm = (body) => ({
   address: String(body.address || '').trim() || null,
   rsvp_deadline: String(body.rsvp_deadline || '').trim() || null,
   published: body.published ? 1 : 0,
+  access_code: body.is_private ? (String(body.access_code || '').trim().toUpperCase().replace(/[^A-Z0-9-]/g, '') || genCode()) : null,
 });
+function genCode() {
+  const abc = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; let c = '';
+  for (let i = 0; i < 6; i++) c += abc[Math.floor(Math.random() * abc.length)];
+  return c;
+}
 
 r.get('/eventos/nuevo', (req, res) => res.render('admin/event_form', { title: 'Nuevo evento', ev: { published: 1 }, error: null }));
 r.post('/eventos/nuevo', upload.single('image'), csrfCheck, (req, res) => {
   const f = eventForm(req.body);
   if (!f.title || !f.starts_at) return res.status(400).render('admin/event_form', { title: 'Nuevo evento', ev: f, error: 'Título y fecha de inicio son obligatorios.' });
-  const info = db.prepare(`INSERT INTO events (title, description, starts_at, ends_at, location, address, rsvp_deadline, published, image, created_by)
-    VALUES (@title, @description, @starts_at, @ends_at, @location, @address, @rsvp_deadline, @published, @image, @by)`)
+  const info = db.prepare(`INSERT INTO events (title, description, starts_at, ends_at, location, address, rsvp_deadline, published, access_code, image, created_by)
+    VALUES (@title, @description, @starts_at, @ends_at, @location, @address, @rsvp_deadline, @published, @access_code, @image, @by)`)
     .run({ ...f, image: req.file ? req.file.filename : null, by: req.user.id });
   req.flash('ok', 'Evento creado.');
   res.redirect(`/admin/eventos/${info.lastInsertRowid}`);
@@ -84,7 +90,8 @@ r.get('/eventos/:id', loadEvent, (req, res) => {
   // Resumen por producto/talla (solo pagados + en verificación)
   const sizeSummary = db.prepare(`SELECT p.name, oi.size, o.status, SUM(oi.qty) AS qty FROM order_items oi JOIN orders o ON o.id=oi.order_id JOIN products p ON p.id=oi.product_id
     WHERE o.event_id = ? AND o.status IN ('paid','review','pending') GROUP BY p.name, oi.size, o.status ORDER BY p.name, oi.size`).all(ev.id);
-  res.render('admin/event', { title: ev.title, ev, attendees, products, orders, totals, sizeSummary });
+  const admitted = ev.access_code ? db.prepare('SELECT u.name, a.granted_at FROM event_access a JOIN users u ON u.id=a.user_id WHERE a.event_id=? ORDER BY a.granted_at DESC').all(ev.id) : [];
+  res.render('admin/event', { title: ev.title, ev, attendees, products, orders, totals, sizeSummary, admitted });
 });
 
 r.get('/eventos/:id/editar', loadEvent, (req, res) => res.render('admin/event_form', { title: 'Editar evento', ev: req.event, error: null }));
@@ -95,7 +102,7 @@ r.post('/eventos/:id/editar', loadEvent, upload.single('image'), csrfCheck, (req
   if (req.body.remove_image) { removeFile(image); image = null; }
   if (req.file) { removeFile(req.event.image); image = req.file.filename; }
   db.prepare(`UPDATE events SET title=@title, description=@description, starts_at=@starts_at, ends_at=@ends_at, location=@location, address=@address,
-    rsvp_deadline=@rsvp_deadline, published=@published, image=@image WHERE id=@id`).run({ ...f, image, id: req.event.id });
+    rsvp_deadline=@rsvp_deadline, published=@published, access_code=@access_code, image=@image WHERE id=@id`).run({ ...f, image, id: req.event.id });
   req.flash('ok', 'Evento actualizado.');
   res.redirect(`/admin/eventos/${req.event.id}`);
 });
@@ -180,6 +187,17 @@ r.post('/pedidos/:id/estado', (req, res) => {
   db.prepare("UPDATE orders SET status = ?, admin_note = ?, paid_at = CASE WHEN ? = 'paid' THEN datetime('now','localtime') ELSE NULL END WHERE id = ?")
     .run(status, String(req.body.admin_note || '').trim().slice(0, 300) || null, status, o.id);
   req.flash('ok', `Pedido #${o.id}: ${h.ORDER_STATUS[status].label}.`);
+  res.redirect(req.body.back || '/admin/pedidos');
+});
+
+// Eliminar pedido (solo sin pago: pendiente, rechazado o cancelado)
+r.post('/pedidos/:id/eliminar', (req, res) => {
+  const o = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
+  if (!o) return res.status(404).render('error', { title: 'No encontrado', message: 'Pedido no encontrado.' });
+  if (!['pending', 'rejected', 'cancelled'].includes(o.status)) { req.flash('bad', 'Solo se pueden eliminar pedidos sin pago (pendientes, rechazados o cancelados).'); return res.redirect(req.body.back || '/admin/pedidos'); }
+  db.prepare('DELETE FROM orders WHERE id = ?').run(o.id);
+  removeFile(o.receipt);
+  req.flash('ok', `Pedido #${o.id} eliminado.`);
   res.redirect(req.body.back || '/admin/pedidos');
 });
 

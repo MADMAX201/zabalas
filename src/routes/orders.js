@@ -8,30 +8,45 @@ const { soldQty } = require('./events');
 
 const r = express.Router();
 
-// Crear pedido: recibe items[<productId>][size][qty]... desde el formulario del evento
-r.post('/eventos/:id/pedido', requireLogin, (req, res) => {
-  const ev = db.prepare('SELECT * FROM events WHERE id = ? AND published = 1').get(req.params.id);
-  if (!ev) return res.status(404).render('error', { title: 'No encontrado', message: 'Evento no encontrado.' });
-
-  // El formulario envía filas: item_product[], item_size[], item_qty[], item_for[]
+// Valida las líneas del formulario (item_product[], item_size[], item_qty[], item_for[]).
+// excludeOrderId: al editar, las unidades del propio pedido no cuentan contra el stock.
+function parseItems(body, ev, excludeOrderId = null) {
   const toArr = v => (v === undefined ? [] : Array.isArray(v) ? v : [v]);
-  const pids = toArr(req.body.item_product), sizes = toArr(req.body.item_size), qtys = toArr(req.body.item_qty), fors = toArr(req.body.item_for);
-
+  const pids = toArr(body.item_product), sizes = toArr(body.item_size), qtys = toArr(body.item_qty), fors = toArr(body.item_for);
   const items = [];
   for (let i = 0; i < pids.length; i++) {
     const qty = parseInt(qtys[i], 10) || 0;
     if (qty <= 0) continue;
     const p = db.prepare('SELECT * FROM products WHERE id = ? AND event_id = ? AND active = 1').get(pids[i], ev.id);
     if (!p) continue;
-    if (p.order_deadline && h.isPast(p.order_deadline)) { req.flash('bad', `Ya cerró el plazo para pedir "${p.name}".`); return res.redirect(`/eventos/${ev.id}#tienda`); }
+    if (p.order_deadline && h.isPast(p.order_deadline)) throw new Error(`Ya cerró el plazo para pedir "${p.name}".`);
     const sizeList = (p.sizes || '').split(',').map(s => s.trim()).filter(Boolean);
     const size = sizeList.length ? String(sizes[i] || '').trim() : null;
-    if (sizeList.length && !sizeList.includes(size)) { req.flash('bad', `Selecciona una talla válida para "${p.name}".`); return res.redirect(`/eventos/${ev.id}#tienda`); }
-    if (p.stock !== null && soldQty(p.id) + qty > p.stock) { req.flash('bad', `No hay suficientes unidades de "${p.name}" (quedan ${Math.max(0, p.stock - soldQty(p.id))}).`); return res.redirect(`/eventos/${ev.id}#tienda`); }
-    items.push({ product_id: p.id, size, qty: Math.min(qty, 50), unit_price: p.price, for_name: String(fors[i] || '').trim().slice(0, 80) || null });
+    if (sizeList.length && !sizeList.includes(size)) throw new Error(`Selecciona una talla válida para "${p.name}".`);
+    items.push({ product_id: p.id, size, qty: Math.min(qty, 50), unit_price: p.price, for_name: String(fors[i] || '').trim().slice(0, 80) || null, _p: p });
   }
-  if (!items.length) { req.flash('bad', 'Agrega al menos un producto con cantidad.'); return res.redirect(`/eventos/${ev.id}#tienda`); }
+  if (!items.length) throw new Error('Agrega al menos un producto con cantidad.');
+  // Stock: suma por producto de este pedido + lo ya vendido (sin el propio pedido)
+  const byProduct = {};
+  for (const it of items) byProduct[it.product_id] = (byProduct[it.product_id] || 0) + it.qty;
+  for (const [pid, qty] of Object.entries(byProduct)) {
+    const p = items.find(i => i.product_id == pid)._p;
+    if (p.stock === null) continue;
+    const own = excludeOrderId ? db.prepare('SELECT COALESCE(SUM(qty),0) AS n FROM order_items WHERE order_id = ? AND product_id = ?').get(excludeOrderId, p.id).n : 0;
+    const left = p.stock - (soldQty(p.id) - own);
+    if (qty > left) throw new Error(`No hay suficientes unidades de "${p.name}" (quedan ${Math.max(0, left)}).`);
+  }
+  return items.map(({ _p, ...it }) => it);
+}
 
+// Crear pedido
+r.post('/eventos/:id/pedido', requireLogin, (req, res) => {
+  const ev = db.prepare('SELECT * FROM events WHERE id = ? AND published = 1').get(req.params.id);
+  if (!ev) return res.status(404).render('error', { title: 'No encontrado', message: 'Evento no encontrado.' });
+  if (ev.access_code && req.user.role !== 'admin' && !db.prepare('SELECT 1 FROM event_access WHERE event_id = ? AND user_id = ?').get(ev.id, req.user.id))
+    return res.status(403).render('error', { title: 'Evento privado', message: 'Necesitas el código del evento para hacer pedidos.' });
+  let items;
+  try { items = parseItems(req.body, ev); } catch (e) { req.flash('bad', e.message); return res.redirect(`/eventos/${ev.id}#tienda`); }
   const total = items.reduce((s, it) => s + it.qty * it.unit_price, 0);
   const orderId = db.transaction(() => {
     const info = db.prepare('INSERT INTO orders (user_id, event_id, total) VALUES (?, ?, ?)').run(req.user.id, ev.id, total);
@@ -56,6 +71,38 @@ r.get('/pedidos', requireLogin, (req, res) => {
 });
 
 r.get('/pedidos/:id', requireLogin, loadOrder, (req, res) => res.render('order', { title: `Pedido #${req.order.id}`, o: req.order }));
+
+// Editar pedido pendiente (cambiar tallas / cantidades)
+function loadProducts(eventId) {
+  return db.prepare('SELECT * FROM products WHERE event_id = ? AND active = 1 ORDER BY id').all(eventId)
+    .map(p => ({ ...p, sizeList: (p.sizes || '').split(',').map(s => s.trim()).filter(Boolean), sold: soldQty(p.id) }));
+}
+r.get('/pedidos/:id/editar', requireLogin, loadOrder, (req, res) => {
+  const o = req.order;
+  if (o.status !== 'pending') { req.flash('bad', 'Solo se pueden editar pedidos pendientes de pago.'); return res.redirect(`/pedidos/${o.id}`); }
+  // Al editar, el stock disponible debe incluir lo que este pedido ya tiene reservado
+  const products = loadProducts(o.event_id).map(p => {
+    const own = o.items.filter(i => i.product_id === p.id).reduce((s, i) => s + i.qty, 0);
+    return { ...p, sold: p.sold - own };
+  });
+  res.render('order_edit', { title: `Editar pedido #${o.id}`, o, products });
+});
+r.post('/pedidos/:id/editar', requireLogin, loadOrder, (req, res) => {
+  const o = req.order;
+  if (o.status !== 'pending') { req.flash('bad', 'Solo se pueden editar pedidos pendientes de pago.'); return res.redirect(`/pedidos/${o.id}`); }
+  const ev = db.prepare('SELECT * FROM events WHERE id = ?').get(o.event_id);
+  let items;
+  try { items = parseItems(req.body, ev, o.id); } catch (e) { req.flash('bad', e.message); return res.redirect(`/pedidos/${o.id}/editar`); }
+  const total = items.reduce((s, it) => s + it.qty * it.unit_price, 0);
+  db.transaction(() => {
+    db.prepare('DELETE FROM order_items WHERE order_id = ?').run(o.id);
+    const ins = db.prepare('INSERT INTO order_items (order_id, product_id, for_name, size, qty, unit_price) VALUES (?, ?, ?, ?, ?, ?)');
+    for (const it of items) ins.run(o.id, it.product_id, it.for_name, it.size, it.qty, it.unit_price);
+    db.prepare('UPDATE orders SET total = ? WHERE id = ?').run(total, o.id);
+  })();
+  req.flash('ok', `Pedido actualizado. Nuevo total: ${h.fmtCOP(total)}.`);
+  res.redirect(`/pedidos/${o.id}`);
+});
 
 // Subir comprobante
 r.post('/pedidos/:id/comprobante', requireLogin, loadOrder, upload.single('receipt'), csrfCheck, (req, res) => {

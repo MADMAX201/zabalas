@@ -4,6 +4,8 @@ import fs from 'fs';
 const BASE = 'http://localhost:3000';
 const shots = 'test/shots'; fs.mkdirSync(shots, { recursive: true });
 const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
+import Database from 'better-sqlite3';
+const db_last_media = () => new Database('data/zabalas.db', { readonly: true }).prepare('SELECT MAX(id) AS id FROM media').get().id;
 const ok = (c, m) => { if (!c) throw new Error('FALLÓ: ' + m); console.log('✔', m); };
 
 // --- Admin ---
@@ -58,6 +60,21 @@ await m.click('#orderBtn');
 ok(/\/pedidos\/1$/.test(m.url()), 'pedido creado');
 ok((await m.textContent('body')).includes('300 123 4567'), 'muestra número Nequi');
 await m.screenshot({ path: `${shots}/07-movil-pago.png`, fullPage: true });
+
+// --- Editar pedido pendiente: quitar la boleta, cambiar talla M -> L, cantidad 2
+await m.goto(BASE + '/eventos/1');
+ok((await m.textContent('body')).includes('pedido #1</b> sin pagar') || (await m.textContent('body')).includes('sin pagar'), 'evento avisa pedido sin pagar');
+await m.click('a[href="/pedidos/1/editar"]');
+ok(/\/pedidos\/1\/editar$/.test(m.url()), 'abre edición');
+ok((await m.$$('.line-item')).length === 3, 'precarga 3 líneas');
+const editSels = await m.$$('.product[data-product="1"] select'); await editSels[0].selectOption('L');
+const editQty = await m.$$('.product[data-product="1"] [name=item_qty]'); await editQty[0].fill('2');
+await m.click('.product[data-product="2"] .rm');
+ok((await m.textContent('#orderTotal')).includes('135.000'), 'total editado 135.000');
+await m.screenshot({ path: `${shots}/07b-movil-editar.png`, fullPage: true });
+await m.click('#orderBtn');
+ok(/\/pedidos\/1$/.test(m.url()) && (await m.textContent('body')).includes('135.000'), 'pedido actualizado a 135.000');
+ok((await m.textContent('body')).includes('talla L'), 'talla cambiada a L');
 await m.setInputFiles('#receipt', 'public/img/logo.jpeg'); await m.fill('#ref', 'M98765');
 await m.click('form[enctype] button.btn');
 ok((await m.textContent('body')).includes('Comprobante recibido'), 'comprobante subido');
@@ -72,6 +89,55 @@ await admin.click('button[value=paid]');
 ok((await admin.textContent('body')).includes('Pagado'), 'pago confirmado');
 await admin.screenshot({ path: `${shots}/10-admin-pedidos.png`, fullPage: true });
 await m.reload(); ok((await m.textContent('body')).includes('Pago confirmado'), 'integrante ve pago confirmado');
+
+// admin elimina un pedido pendiente (y no puede eliminar uno pagado)
+await m.goto(BASE + '/eventos/1'); await m.click('.product[data-product="2"] .add-line'); await m.click('#orderBtn');
+ok(/\/pedidos\/2$/.test(m.url()), 'segundo pedido pendiente creado');
+await admin.goto(BASE + '/admin/pedidos?estado=pending');
+ok((await admin.$$('form[action="/admin/pedidos/2/eliminar"]')).length === 1, 'admin ve botón eliminar en pendiente');
+admin.once('dialog', d => d.accept());
+await admin.click('form[action="/admin/pedidos/2/eliminar"] button');
+ok((await admin.textContent('body')).includes('Pedido #2 eliminado'), 'pedido pendiente eliminado');
+await admin.goto(BASE + '/admin/pedidos?estado=paid');
+ok((await admin.$$('form[action="/admin/pedidos/1/eliminar"]')).length === 0, 'pagado no muestra eliminar');
+const del = await admin.request.post(BASE + '/admin/pedidos/1/eliminar', { form: { _csrf: await admin.evaluate(() => document.querySelector('[name=_csrf]').value) } });
+await admin.goto(BASE + '/admin/pedidos?estado=paid');
+ok((await admin.textContent('body')).includes('#1'), 'pagado sigue existiendo tras intento de borrado');
+
+// --- Evento privado con código ---
+await admin.goto(BASE + '/admin/eventos/nuevo');
+await admin.fill('[name=title]', 'Cumpleaños sorpresa de la abuela'); await admin.fill('[name=starts_at]', '2026-11-10T18:00');
+await admin.check('#isPrivate'); await admin.fill('[name=access_code]', 'abuela80'); await admin.click('button.btn');
+ok(/\/admin\/eventos\/2$/.test(admin.url()) && (await admin.textContent('body')).includes('ABUELA80'), 'evento privado creado con código');
+await m.goto(BASE + '/');
+ok(!(await m.textContent('body')).includes('Cumpleaños sorpresa'), 'integrante no ve el evento privado en la lista');
+let rl = await m.goto(BASE + '/eventos/2'); ok(rl.status() === 403 && (await m.textContent('body')).includes('Evento privado'), 'acceso directo pide código');
+await m.fill('#code', 'MALO'); await m.click('button.btn'); ok((await m.textContent('body')).includes('no es correcto'), 'código erróneo rechazado');
+await m.fill('#code', 'abuela80'); await m.click('button.btn');
+ok(/\/eventos\/2$/.test(m.url()) && (await m.textContent('body')).includes('Cumpleaños sorpresa'), 'código correcto da acceso');
+await m.goto(BASE + '/'); ok((await m.textContent('body')).includes('Cumpleaños sorpresa'), 'ahora sí aparece en su lista');
+await m.screenshot({ path: `${shots}/12-evento-privado.png` });
+
+// --- Galería ---
+await m.goto(BASE + '/galeria/subir?evento=1');
+await m.setInputFiles('#files', ['public/img/logo.jpeg', 'test/shots/01-login.png']);
+await m.fill('#caption', 'Fotos de prueba'); await m.click('#upBtn');
+ok(m.url().endsWith('/galeria') && (await m.$$('.gal-item')).length === 2, '2 fotos subidas y compartidas');
+await m.goto(BASE + '/galeria/subir'); await m.setInputFiles('#files', ['public/img/logo.jpeg']);
+await m.click('label:has(input[value=private]) span'); await m.click('#upBtn');
+ok(m.url().endsWith('/galeria/mia') && (await m.$$('.gal-item')).length === 3, 'foto privada va a Mi galería');
+await m.goto(BASE + '/galeria'); ok((await m.$$('.gal-item')).length === 2, 'privada no aparece en familia');
+await admin.goto(BASE + '/galeria'); ok((await admin.$$('.gal-item')).length === 2, 'admin ve 2 compartidas');
+const privId = db_last_media();
+let pr = await admin.request.get(BASE + '/galeria/' + privId); ok(pr.status() === 404 || (await pr.text()).includes('Solo yo'), 'privada visible solo para dueño/admin');
+await m.screenshot({ path: `${shots}/13-galeria.png` });
+await m.goto(BASE + '/galeria/' + privId + '?de=mia');
+ok((await m.textContent('body')).includes('Solo yo'), 'detalle muestra privada');
+await m.click('details summary'); await m.click('label:has(input[value=family]) span'); await m.click('details form button.btn');
+ok((await m.textContent('body')).includes('Familia'), 'cambiada a familia');
+await m.goto(BASE + '/galeria'); ok((await m.$$('.gal-item')).length === 3, 'ahora hay 3 compartidas');
+const th = await m.request.get(BASE + '/uploads/galeria/' + (await m.getAttribute('.gal-item img', 'src')).split('/').pop());
+ok(th.status() === 200 && th.headers()['content-type'].includes('image'), 'miniatura servida');
 
 // excel
 const x = await admin.request.get(BASE + '/admin/eventos/1/exportar.xlsx');
