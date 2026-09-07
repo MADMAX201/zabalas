@@ -1,28 +1,23 @@
+# zabalas.online — proyecto totalmente independiente: contenedor, red y datos propios.
+# El Nginx del sistema reenvía zabalas.online -> 127.0.0.1:3010 (ver DEPLOY.md).
+name: zabalas
+
 services:
   app:
     build: .
+    container_name: zabalas-app
     restart: unless-stopped
     env_file: .env
     environment:
       - DATA_DIR=/app/data
+      - PORT=3000
     volumes:
       - ./data:/app/data
-    expose:
-      - "3000"
-
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
     ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - app
+      - "127.0.0.1:3010:3000"
+    networks:
+      - zabalas-net
 
-volumes:
-  caddy_data:
-  caddy_config:
+networks:
+  zabalas-net:
+    name: zabalas-net

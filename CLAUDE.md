@@ -5,7 +5,7 @@ Sitio privado para que los integrantes de la familia se registren, vean eventos,
 ## Contexto y decisiones (2026-09-07)
 
 - **Dominio:** zabalas.online, registrado en **Hostinger** (solo DNS). El hosting **no** es Hostinger.
-- **Servidor:** VPS en **Contabo** (el mismo que se usa para el proyecto "revisor IA"). Despliegue con Docker Compose + Caddy (HTTPS automático).
+- **Servidor:** VPS en **Contabo** (el mismo que se usa para el proyecto "revisor IA"). Despliegue con Docker Compose; entra por el Nginx del sistema (bloque propio) con certbot. Proyecto aislado: contenedor `zabalas-app`, red `zabalas-net`, datos en `/home/deploy/zabalas/data`.
 - **Pagos:** Nequi no tiene API para bolsillos personales → flujo elegido: el sitio muestra número/QR de Nequi, el familiar transfiere, sube la captura y un admin confirma. Sin comisiones. Queda abierta la puerta a Wompi/PayU más adelante (estado `paid` se marcaría automático).
 - **Acceso:** registro libre con **código familiar** secreto (Admin > Ajustes). El primer usuario registrado o el `ADMIN_EMAIL` del `.env` es admin.
 - **Admin completo:** eventos, productos (tallas, precio, stock, fecha límite), asistencias, confirmación de pagos, usuarios, ajustes, exportar Excel por evento.
@@ -30,7 +30,7 @@ src/views/           plantillas EJS (partials/, admin/)
 public/              css, js, img (logo)
 data/                zabalas.db + uploads/ (persistente, NO se versiona)
 test/e2e.mjs         prueba end-to-end con Playwright (flujo completo)
-Dockerfile, docker-compose.yml, Caddyfile, .env.example
+Dockerfile, docker-compose.yml, deploy/nginx-zabalas.online.conf, .env.example
 ```
 
 ## Modelo de datos
@@ -54,11 +54,11 @@ node test/e2e.mjs      # prueba e2e (requiere playwright y servidor corriendo)
 
 ## Despliegue (Contabo)
 
-Ver `DEPLOY.md`. Resumen: DNS A en Hostinger → IP del VPS; `docker compose up -d --build`; Caddy obtiene el certificado solo.
+Ver `DEPLOY.md`. Resumen: DNS A en Hostinger → 89.117.60.52; `git clone` en /home/deploy/zabalas; `docker compose up -d --build` (127.0.0.1:3010); bloque Nginx + certbot.
 
 ## Seguridad
 
-- Contraseñas con bcrypt; sesiones httpOnly/sameSite; cookie `secure` en producción (detrás de Caddy con `trust proxy`).
+- Contraseñas con bcrypt; sesiones httpOnly/sameSite; cookie `secure` en producción (detrás de Nginx con `trust proxy`).
 - CSRF por token de sesión en todos los POST (en multipart se valida después de multer).
 - Límite de 10 intentos de login por IP cada 15 min.
 - Uploads solo imagen/PDF, máx. 8 MB; nombres aleatorios.
@@ -74,3 +74,4 @@ Ver `DEPLOY.md`. Resumen: DNS A en Hostinger → IP del VPS; `docker compose up 
 ## Registro de trabajo
 
 - 2026-09-07: v1.0 creada y probada end-to-end (registro, evento, RSVP, ics, pedido con tallas, comprobante Nequi, confirmación admin, Excel). Capturas en `test/shots/`.
+- 2026-09-07: repo GitHub MADMAX201/zabalas creado (push desde el Mac). Despliegue cambiado de Caddy a Nginx del sistema + puerto local 3010 (opción A acordada con Mario).

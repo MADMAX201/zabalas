@@ -3,3 +3,7 @@ data/
 .env
 *.log
 .DS_Store
+
+Claude outputs/
+*.ttf
+*.pdf
