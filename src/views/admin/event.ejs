@@ -18,6 +18,9 @@
   <p class="small muted" style="margin:6px 0 0">Admitidos con código (<%= admitted.length %>): <%= admitted.map(x => x.name).join(', ') || 'nadie todavía' %></p>
 </div>
 <% } %>
+<% if (totals.dups && totals.dups.length) { %>
+<div class="flash info mt">Personas marcadas por más de un titular (se cuentan una sola vez): <%= totals.dups.map(d => `${d.name} (${d.owners.join(' y ')})`).join('; ') %></div>
+<% } %>
 <div class="stats mt mb">
   <div class="stat"><b><%= totals.yes %><% if (totals.guests) { %> <span style="font-size:1rem">+<%= totals.guests %></span><% } %></b><span>confirmados (+ acompañantes)</span></div>
   <div class="stat"><b><%= totals.maybe %></b><span>tal vez</span></div>

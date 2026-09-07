@@ -1,5 +1,5 @@
 const express = require('express');
-const { db, settings, eventDates, household, companionsFor } = require('../db');
+const { db, settings, eventDates, household, companionsFor, addHouseholdMember, uniqueCompanions, isFullName } = require('../db');
 const { requireLogin } = require('../middleware');
 const h = require('../helpers');
 
@@ -68,6 +68,10 @@ r.post('/eventos/codigo', requireLogin, (req, res) => {
 r.get('/eventos/:id', requireLogin, loadEvent, (req, res) => {
   const ev = req.event;
   const stats = eventStats.get(ev.id);
+  const uc = uniqueCompanions(ev.id);
+  // guests = acompañantes únicos + extras sin nombre
+  stats.guests = uc.unique + db.prepare("SELECT r.user_id, r.guests FROM rsvps r WHERE r.event_id = ? AND r.status = 'yes'").all(ev.id)
+    .reduce((s, r) => s + Math.max(0, r.guests - companionsFor(ev.id, r.user_id).length), 0);
   const myRsvp = db.prepare('SELECT * FROM rsvps WHERE event_id = ? AND user_id = ?').get(ev.id, req.user.id);
   const attendees = db.prepare(`SELECT u.id AS user_id, u.name, r.status, r.guests, r.note FROM rsvps r JOIN users u ON u.id = r.user_id
     WHERE r.event_id = ? ORDER BY CASE r.status WHEN 'yes' THEN 0 WHEN 'maybe' THEN 1 ELSE 2 END, u.name`).all(ev.id)
@@ -105,9 +109,19 @@ r.post('/eventos/:id/asistencia', requireLogin, loadEvent, (req, res) => {
   if (closed) { req.flash('bad', 'Ya cerró el plazo para confirmar asistencia.'); return res.redirect(`/eventos/${ev.id}`); }
   const extra = Math.max(0, Math.min(20, parseInt(req.body.guests || '0', 10) || 0));
   // Acompañantes del núcleo familiar (member_ids[])
+  const arr = v => (v === undefined ? [] : Array.isArray(v) ? v : [v]);
+  const rawM = arr(req.body.member_ids);
+  // Personas nuevas agregadas desde el formulario: se guardan en el núcleo y quedan marcadas
+  const newNames = arr(req.body.new_name), newNotes = arr(req.body.new_note), newAlias = arr(req.body.new_alias);
+  const created = [];
+  if (status === 'yes') for (let i = 0; i < newNames.length; i++) {
+    const nm = String(newNames[i] || '').trim(); if (!nm) continue;
+    if (!isFullName(nm)) { req.flash('bad', `Escribe nombre y apellido para "${nm}" (por ejemplo, Tomás Zabala).`); return res.redirect(`/eventos/${ev.id}#asistencia`); }
+    const m = addHouseholdMember(req.user.id, nm, String(newNotes[i] || '').trim().slice(0, 60) || null, parseInt(newAlias[i], 10) || null);
+    if (m) created.push(m.id);
+  }
   const mine = new Set(household(req.user.id).map(m => m.id));
-  const rawM = req.body.member_ids === undefined ? [] : (Array.isArray(req.body.member_ids) ? req.body.member_ids : [req.body.member_ids]);
-  const companions = status === 'yes' ? rawM.map(Number).filter(id => mine.has(id)) : [];
+  const companions = status === 'yes' ? [...new Set([...rawM.map(Number), ...created])].filter(id => mine.has(id)) : [];
   const guests = status === 'yes' ? companions.length + extra : 0;
   db.prepare(`INSERT INTO rsvps (event_id, user_id, status, guests, extra_guests, note) VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT(event_id, user_id) DO UPDATE SET status = excluded.status, guests = excluded.guests, extra_guests = excluded.extra_guests, note = excluded.note, updated_at = datetime('now','localtime')`)

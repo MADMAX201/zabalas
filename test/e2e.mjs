@@ -44,7 +44,7 @@ ok(m.url() === BASE + '/', 'registro integrante');
 await m.screenshot({ path: `${shots}/04-movil-home.png` });
 await m.goto(BASE + '/eventos/1');
 await m.screenshot({ path: `${shots}/05-movil-evento.png`, fullPage: true });
-await m.click('label:has(input[value=yes]) span'); await m.fill('#guests', '2'); await m.click('#rsvpForm button.btn');
+await m.click('label:has(input[value=yes]) span'); await m.fill('#guests', '2'); await m.click('#rsvpSubmit');
 ok((await m.textContent('body')).includes('Asistencia confirmada'), 'rsvp guardado');
 const ics = await m.request.get(BASE + '/eventos/1/calendario.ics'); ok((await ics.text()).includes('BEGIN:VEVENT'), 'ics generado');
 
@@ -120,15 +120,42 @@ await m.screenshot({ path: `${shots}/12-evento-privado.png` });
 
 // --- Núcleo familiar y acompañantes ---
 await m.goto(BASE + '/perfil');
-await m.fill('form[action="/perfil/familia"] [name=name]', 'Tomás'); await m.fill('form[action="/perfil/familia"] [name=note]', 'hijo'); await m.click('form[action="/perfil/familia"] button');
-await m.fill('form[action="/perfil/familia"] [name=name]', 'Sofía'); await m.click('form[action="/perfil/familia"] button');
+await m.fill('form[action="/perfil/familia"] [name=name]', 'Tomás Zabala'); await m.fill('form[action="/perfil/familia"] [name=note]', 'hijo'); await m.click('form[action="/perfil/familia"] button');
+await m.fill('form[action="/perfil/familia"] [name=name]', 'Sofía Zabala'); await m.click('form[action="/perfil/familia"] button');
 ok((await m.$$('form[action^="/perfil/familia/"]')).length === 2, 'núcleo familiar con 2 personas');
 await m.goto(BASE + '/eventos/1');
 ok((await m.$$('input[name=member_ids]')).length === 2, 'asistencia muestra a Tomás y Sofía');
+// agregar persona inline desde el evento
 await m.click('label:has(input[value=yes]) span');
-await m.check('input[name=member_ids][value="1"]'); await m.fill('#guests', '1'); await m.click('#rsvpForm button.btn');
+await m.click('#addPerson'); await m.fill('[name=new_name]', 'Abuela Rosa'); await m.fill('[name=new_note]', 'mamá');
+await m.click('#rsvpSubmit');
+ok((await m.textContent('body')).includes('Abuela Rosa'), 'persona agregada inline queda marcada');
+ok((await m.$$('input[name=member_ids]')).length === 3, 'y quedó en el núcleo (3)');
+// duplicado: otro titular (admin) agrega "tomas" sin tilde -> aviso y vinculación
+await admin.goto(BASE + '/perfil');
+const dupResp = await (await admin.request.get(BASE + '/perfil/familia/buscar?q=tomas%20zabala')).json();
+ok(dupResp.members.length === 1 && dupResp.members[0].owner === 'Laura Zabala', 'búsqueda detecta duplicado sin tilde');
+// nombre sin apellido se rechaza
+await admin.fill('form[action="/perfil/familia"] [name=name]', 'Tomas'); await admin.click('form[action="/perfil/familia"] button');
+ok((await admin.textContent('body')).includes('nombre y apellido'), 'exige nombre y apellido');
+await admin.fill('form[action="/perfil/familia"] [name=name]', 'tomas zabala'); await admin.press('form[action="/perfil/familia"] [name=name]', 'Tab');
+await admin.waitForSelector('.dup-warn:not([hidden])');
+ok((await admin.textContent('.dup-warn')).includes('núcleo de Laura Zabala'), 'aviso de duplicado en pantalla');
+await admin.click('.dup-warn label:has(input[value]:not([value=""])) span');
+await admin.click('form[action="/perfil/familia"] button');
+ok((await admin.textContent('body')).includes('vinculado con la misma persona'), 'vinculado como la misma persona');
+await m.goto(BASE + '/eventos/1');
+await m.click('label:has(input[value=yes]) span');
+await m.uncheck('input[name=member_ids][value="2"]'); await m.uncheck('input[name=member_ids][value="3"]'); await m.check('input[name=member_ids][value="1"]'); await m.fill('#guests', '1'); await m.click('#rsvpSubmit');
 let body = await m.textContent('body');
-ok(body.includes('Laura Zabala + Tomás +1'), 'quiénes van muestra acompañante por nombre y extra');
+ok(body.includes('Laura Zabala + Tomás Zabala +1'), 'quiénes van muestra acompañante por nombre y extra');
+// admin marca a Tomas en el evento 1 -> conteo único
+await admin.goto(BASE + '/eventos/1'); await admin.click('label:has(input[value=yes]) span');
+await admin.check('input[name=member_ids]'); await admin.click('#rsvpSubmit');
+await admin.goto(BASE + '/admin/eventos/1');
+ok((await admin.textContent('body')).includes('se cuentan una sola vez') && (await admin.textContent('body')).includes('Tomás'), 'admin avisa duplicado Tomás');
+// limpiar: admin vuelve a "no" para no alterar el resto del test
+await admin.goto(BASE + '/eventos/1'); await admin.click('label:has(input[value=no]) span'); await admin.click('#rsvpSubmit');
 await m.screenshot({ path: `${shots}/16-acompanantes.png`, fullPage: true });
 await admin.goto(BASE + '/admin/eventos/1');
 ok((await admin.textContent('body')).includes('Tomás'), 'admin ve nombre del acompañante');
@@ -153,7 +180,7 @@ ok((await m.$$('input[name=date_ids]')).length === 4, 'recuadro con 4 casillas')
 await m.click('label:has(input[value=yes]) span');
 const boxes = await m.$$('input[name=date_ids]'); await boxes[1].uncheck(); await boxes[2].uncheck();
 await m.screenshot({ path: `${shots}/15-movil-fechas.png`, fullPage: true });
-await m.click('#rsvpForm button.btn');
+await m.click('#rsvpSubmit');
 ok((await m.textContent('body')).includes('Confirmaste 2 de 4 fechas'), 'asistencia a 2 de 4 fechas');
 const icsMine = await (await m.request.get(BASE + '/eventos/3/calendario.ics?mias=1')).text();
 ok((icsMine.match(/BEGIN:VEVENT/g) || []).length === 2, 'ics de mis fechas tiene 2 eventos');

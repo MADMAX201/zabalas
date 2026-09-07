@@ -191,9 +191,41 @@ CREATE TABLE IF NOT EXISTS rsvp_companions (
 );
 `);
 if (!cols('rsvps').includes('extra_guests')) db.exec('ALTER TABLE rsvps ADD COLUMN extra_guests INTEGER NOT NULL DEFAULT 0');
+if (!cols('household_members').includes('alias_of')) db.exec('ALTER TABLE household_members ADD COLUMN alias_of INTEGER REFERENCES household_members(id) ON DELETE SET NULL');
+if (!cols('household_members').includes('norm')) db.exec('ALTER TABLE household_members ADD COLUMN norm TEXT');
+const normName = (s) => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9ñ ]+/g, ' ').replace(/\s+/g, ' ').trim();
+for (const m of db.prepare('SELECT id, name FROM household_members WHERE norm IS NULL').all()) db.prepare('UPDATE household_members SET norm = ? WHERE id = ?').run(normName(m.name), m.id);
 function household(userId) { return db.prepare('SELECT * FROM household_members WHERE user_id = ? ORDER BY id').all(userId); }
+// Coincidencias de nombre en núcleos de OTROS titulares y en cuentas registradas
+function findSimilar(name, excludeUserId) {
+  const n = normName(name); if (!n) return { members: [], users: [] };
+  const members = db.prepare(`SELECT m.id, m.name, m.note, u.name AS owner FROM household_members m JOIN users u ON u.id = m.user_id
+    WHERE m.norm = ? AND m.user_id != ? AND m.alias_of IS NULL ORDER BY m.id`).all(n, excludeUserId);
+  const users = db.prepare('SELECT id, name FROM users WHERE active = 1 AND id != ?').all(excludeUserId).filter(u => normName(u.name) === n);
+  return { members, users };
+}
+// Crea (o reutiliza) una persona del núcleo; alias_of vincula con la misma persona en otro núcleo
+const isFullName = (name) => normName(name).split(' ').filter(w => w.length >= 2).length >= 2;
+function addHouseholdMember(userId, name, note, aliasOf) {
+  const n = normName(name); if (!n || !isFullName(name)) return null;
+  const existing = db.prepare('SELECT * FROM household_members WHERE user_id = ? AND norm = ?').get(userId, n);
+  if (existing) return existing;
+  let alias = null;
+  if (aliasOf) { const o = db.prepare('SELECT id, alias_of FROM household_members WHERE id = ? AND user_id != ?').get(aliasOf, userId); if (o) alias = o.alias_of || o.id; }
+  const info = db.prepare('INSERT INTO household_members (user_id, name, note, alias_of, norm) VALUES (?, ?, ?, ?, ?)').run(userId, String(name).trim().slice(0, 80), note || null, alias, n);
+  return db.prepare('SELECT * FROM household_members WHERE id = ?').get(info.lastInsertRowid);
+}
+const canonicalId = (m) => m.alias_of || m.id;
 function companionsFor(eventId, userId) {
-  return db.prepare('SELECT m.id, m.name FROM rsvp_companions c JOIN household_members m ON m.id = c.member_id WHERE c.event_id = ? AND c.user_id = ? ORDER BY m.id').all(eventId, userId);
+  return db.prepare('SELECT m.id, m.name, m.alias_of FROM rsvp_companions c JOIN household_members m ON m.id = c.member_id WHERE c.event_id = ? AND c.user_id = ? ORDER BY m.id').all(eventId, userId);
+}
+// Acompañantes de un evento contados una sola vez aunque los marquen varios titulares
+function uniqueCompanions(eventId) {
+  const rows = db.prepare(`SELECT c.user_id, u.name AS owner, m.id, m.name, m.alias_of FROM rsvp_companions c JOIN household_members m ON m.id = c.member_id JOIN users u ON u.id = c.user_id
+    WHERE c.event_id = ?`).all(eventId);
+  const seen = new Map(); const dups = [];
+  for (const r of rows) { const k = canonicalId(r); if (seen.has(k)) dups.push({ name: r.name, owners: [seen.get(k).owner, r.owner] }); else seen.set(k, r); }
+  return { unique: seen.size, dups };
 }
 
 // Recalcula el rango del evento a partir de sus fechas
@@ -205,4 +237,4 @@ function eventDates(eventId) {
   return db.prepare('SELECT * FROM event_dates WHERE event_id = ? ORDER BY starts_at').all(eventId);
 }
 
-module.exports = { db, settings, DATA_DIR, syncEventRange, eventDates, household, companionsFor };
+module.exports = { db, settings, DATA_DIR, syncEventRange, eventDates, household, companionsFor, findSimilar, addHouseholdMember, uniqueCompanions, normName, isFullName };

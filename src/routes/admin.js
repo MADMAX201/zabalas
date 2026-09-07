@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const ExcelJS = require('exceljs');
 const bcrypt = require('bcryptjs');
-const { db, settings, DATA_DIR, syncEventRange, eventDates, companionsFor } = require('../db');
+const { db, settings, DATA_DIR, syncEventRange, eventDates, companionsFor, uniqueCompanions } = require('../db');
 const { requireAdmin, upload, csrfCheck } = require('../middleware');
 const h = require('../helpers');
 
@@ -70,7 +70,7 @@ function loadEvent(req, res, next) {
 
 r.get('/eventos/:id', loadEvent, (req, res) => {
   const ev = req.event;
-  const attendees = db.prepare(`SELECT u.id AS user_id, u.name, u.email, u.phone, r.status, r.guests, r.note, r.updated_at FROM rsvps r JOIN users u ON u.id=r.user_id
+  const attendees = db.prepare(`SELECT u.id AS user_id, u.name, u.email, u.phone, r.status, r.guests, r.extra_guests, r.note, r.updated_at FROM rsvps r JOIN users u ON u.id=r.user_id
     WHERE r.event_id = ? ORDER BY CASE r.status WHEN 'yes' THEN 0 WHEN 'maybe' THEN 1 ELSE 2 END, u.name`).all(ev.id)
     .map(a => ({ ...a, companions: companionsFor(ev.id, a.user_id).map(c => c.name) }));
   const products = db.prepare('SELECT * FROM products WHERE event_id = ? ORDER BY id').all(ev.id).map(p => ({
@@ -83,7 +83,8 @@ r.get('/eventos/:id', loadEvent, (req, res) => {
     .map(o => ({ ...o, items: db.prepare('SELECT oi.*, p.name FROM order_items oi JOIN products p ON p.id=oi.product_id WHERE order_id=?').all(o.id) }));
   const totals = {
     yes: attendees.filter(a => a.status === 'yes').length,
-    guests: attendees.filter(a => a.status === 'yes').reduce((s, a) => s + a.guests, 0),
+    guests: uniqueCompanions(ev.id).unique + attendees.filter(a => a.status === 'yes').reduce((s, a) => s + Math.max(0, a.guests - a.companions.length), 0),
+    dups: uniqueCompanions(ev.id).dups,
     maybe: attendees.filter(a => a.status === 'maybe').length,
     no: attendees.filter(a => a.status === 'no').length,
     paid: orders.filter(o => o.status === 'paid').reduce((s, o) => s + o.total, 0),

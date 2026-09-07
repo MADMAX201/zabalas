@@ -1,6 +1,6 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
-const { db, settings, household } = require('../db');
+const { db, settings, household, findSimilar, addHouseholdMember, isFullName } = require('../db');
 const { requireLogin } = require('../middleware');
 
 const r = express.Router();
@@ -92,12 +92,14 @@ r.post('/perfil', requireLogin, (req, res) => {
 // Núcleo familiar (personas que suelen ir conmigo)
 r.post('/perfil/familia', requireLogin, (req, res) => {
   const name = String(req.body.name || '').trim().slice(0, 80);
-  if (name.length < 2) { req.flash('bad', 'Escribe el nombre.'); return res.redirect('/perfil#familia'); }
+  if (!isFullName(name)) { req.flash('bad', 'Escribe nombre y apellido (por ejemplo, Tomás Zabala) para evitar confusiones.'); return res.redirect('/perfil#familia'); }
   if (household(req.user.id).length >= 20) { req.flash('bad', 'Máximo 20 personas en tu núcleo.'); return res.redirect('/perfil#familia'); }
-  db.prepare('INSERT INTO household_members (user_id, name, note) VALUES (?, ?, ?)').run(req.user.id, name, String(req.body.note || '').trim().slice(0, 60) || null);
-  req.flash('ok', `${name} agregado/a a tu núcleo familiar.`);
+  const m = addHouseholdMember(req.user.id, name, String(req.body.note || '').trim().slice(0, 60) || null, parseInt(req.body.alias_of, 10) || null);
+  req.flash('ok', `${m.name} agregado/a a tu núcleo familiar${m.alias_of ? ' (vinculado con la misma persona en otro núcleo)' : ''}.`);
   res.redirect('/perfil#familia');
 });
+// Búsqueda de posibles duplicados (JSON para el formulario)
+r.get('/perfil/familia/buscar', requireLogin, (req, res) => res.json(findSimilar(req.query.q, req.user.id)));
 r.post('/perfil/familia/:id/eliminar', requireLogin, (req, res) => {
   db.prepare('DELETE FROM household_members WHERE id = ? AND user_id = ?').run(req.params.id, req.user.id);
   req.flash('ok', 'Eliminado de tu núcleo familiar.');

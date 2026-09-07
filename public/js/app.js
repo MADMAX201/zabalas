@@ -63,6 +63,41 @@
     recalc();
   }
 
+  // Núcleo familiar: agregar personas desde el formulario de asistencia + detección de duplicados
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  async function dupCheck(input, warnEl, aliasEl) {
+    const q = input.value.trim(); warnEl.hidden = true; warnEl.innerHTML = ''; if (aliasEl) aliasEl.value = '';
+    if (q.length < 2) return;
+    try {
+      const r = await fetch('/perfil/familia/buscar?q=' + encodeURIComponent(q), { headers: { Accept: 'application/json' } });
+      const d = await r.json(); let html = '';
+      if (d.users.length) html += `<div class="flash warn" style="margin:6px 0"><b>${esc(d.users[0].name)}</b> ya tiene cuenta propia en el sitio: puede confirmar su asistencia por su cuenta. Si es otra persona con el mismo nombre, continúa.</div>`;
+      if (d.members.length) {
+        const m = d.members[0];
+        html += `<div class="flash info" style="margin:6px 0">Ya existe <b>${esc(m.name)}</b>${m.note ? ' (' + esc(m.note) + ')' : ''} en el núcleo de <b>${esc(m.owner)}</b>. ¿Es la misma persona?
+          <div class="seg mt" style="max-width:320px"><label><input type="radio" name="dup_${m.id}" value="${m.id}" data-alias><span>Sí, la misma</span></label>
+          <label><input type="radio" name="dup_${m.id}" value="" data-alias checked><span>No, es otra</span></label></div></div>`;
+      }
+      if (html) { warnEl.innerHTML = html; warnEl.hidden = false;
+        warnEl.querySelectorAll('[data-alias]').forEach(rb => rb.addEventListener('change', () => { if (aliasEl && rb.checked) aliasEl.value = rb.value; }));
+      }
+    } catch {}
+  }
+  const addBtn = document.getElementById('addPerson'), ptpl = document.getElementById('personTpl'), holder = document.getElementById('newPeople');
+  if (addBtn && ptpl) {
+    addBtn.addEventListener('click', () => {
+      const el = ptpl.content.firstElementChild.cloneNode(true);
+      const name = el.querySelector('[name=new_name]'), warn = el.querySelector('.dup-warn'), alias = el.querySelector('[name=new_alias]');
+      name.addEventListener('blur', () => dupCheck(name, warn, alias));
+      el.querySelector('.rm').addEventListener('click', () => el.remove());
+      holder.appendChild(el); name.focus();
+    });
+  }
+  document.querySelectorAll('input[data-dupcheck]').forEach(inp => {
+    const form = inp.closest('form'); const warn = form.querySelector('.dup-warn'), alias = form.querySelector('[name=alias_of]');
+    inp.addEventListener('blur', () => dupCheck(inp, warn, alias));
+  });
+
   // Copiar número Nequi
   document.querySelectorAll('.copy').forEach(b => b.addEventListener('click', async () => {
     try { await navigator.clipboard.writeText(b.dataset.copy); b.textContent = '¡Copiado!'; setTimeout(() => b.textContent = 'Copiar', 1500); } catch {}
