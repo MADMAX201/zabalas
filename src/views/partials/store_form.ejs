@@ -23,10 +23,14 @@
 </form>
 <template id="lineTpl">
   <div class="line-item">
-    <div><label>Para quién</label><input type="text" name="item_for" placeholder="Nombre (opcional)" maxlength="80"></div>
+    <div><label>Para quién</label><input type="text" name="item_for" placeholder="Nombre (opcional)" maxlength="80" list="householdNames"></div>
     <div class="sizeBox"><label>Talla</label><select name="item_size"></select></div>
     <div><label>Cant.</label><input type="number" name="item_qty" min="1" max="50" value="1"></div>
     <button type="button" class="btn ghost sm rm" title="Quitar">✕</button>
     <input type="hidden" name="item_product">
   </div>
 </template>
+<datalist id="householdNames">
+  <option value="<%= user.name %>">
+  <% (typeof members !== 'undefined' ? members : []).forEach(mm => { %><option value="<%= mm.name %>"><% }) %>
+</datalist>

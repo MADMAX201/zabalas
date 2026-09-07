@@ -12,5 +12,26 @@
       <button class="btn block mt">Guardar</button>
     </form>
   </div>
+
+  <div class="card mt" id="familia">
+    <h2>👨‍👩‍👧 Mi núcleo familiar</h2>
+    <p class="muted small">Las personas que suelen ir contigo (pareja, hijos…). Al confirmar asistencia a un evento podrás marcar quiénes van, y en la tienda te sugerimos sus nombres.</p>
+    <% if (!members.length) { %><p class="muted">Aún no has agregado a nadie.</p><% } else { %>
+    <table class="tbl">
+      <% members.forEach(m => { %>
+      <tr><td><b><%= m.name %></b><% if (m.note) { %> <span class="small muted">· <%= m.note %></span><% } %></td>
+        <td class="right"><form method="post" action="/perfil/familia/<%= m.id %>/eliminar" data-confirm="¿Quitar a <%= m.name %> de tu núcleo?"><input type="hidden" name="_csrf" value="<%= csrf %>"><button class="btn ghost sm">✕</button></form></td></tr>
+      <% }) %>
+    </table>
+    <% } %>
+    <form method="post" action="/perfil/familia" class="mt">
+      <input type="hidden" name="_csrf" value="<%= csrf %>">
+      <div class="row" style="align-items:flex-end">
+        <div style="flex:2;min-width:160px"><label>Nombre</label><input type="text" name="name" required maxlength="80" placeholder="Tomás"></div>
+        <div style="flex:1;min-width:110px"><label>Parentesco (opcional)</label><input type="text" name="note" maxlength="60" placeholder="hijo"></div>
+        <button class="btn">+ Agregar</button>
+      </div>
+    </form>
+  </div>
 </div>
 <%- include('partials/foot') %>

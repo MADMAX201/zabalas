@@ -1,5 +1,5 @@
 const express = require('express');
-const { db, settings } = require('../db');
+const { db, settings, eventDates, household, companionsFor } = require('../db');
 const { requireLogin } = require('../middleware');
 const h = require('../helpers');
 
@@ -23,7 +23,11 @@ r.get('/', requireLogin, (req, res) => {
   const myRsvps = {};
   for (const x of db.prepare('SELECT event_id, status FROM rsvps WHERE user_id = ?').all(req.user.id)) myRsvps[x.event_id] = x.status;
   const pendingOrders = db.prepare("SELECT COUNT(*) AS n FROM orders WHERE user_id = ? AND status = 'pending'").get(req.user.id).n;
-  const withStats = (list) => list.map(e => ({ ...e, stats: eventStats.get(e.id) }));
+  const withStats = (list) => list.map(e => {
+    const dates = eventDates(e.id);
+    const nextDate = dates.find(d => !h.isPast(d.ends_at || d.starts_at)) || dates[dates.length - 1] || null;
+    return { ...e, stats: eventStats.get(e.id), dates, nextDate };
+  });
   res.render('home', { title: 'Eventos', upcoming: withStats(upcoming), past: withStats(past), myRsvps, pendingOrders });
 });
 
@@ -65,16 +69,27 @@ r.get('/eventos/:id', requireLogin, loadEvent, (req, res) => {
   const ev = req.event;
   const stats = eventStats.get(ev.id);
   const myRsvp = db.prepare('SELECT * FROM rsvps WHERE event_id = ? AND user_id = ?').get(ev.id, req.user.id);
-  const attendees = db.prepare(`SELECT u.name, r.status, r.guests, r.note FROM rsvps r JOIN users u ON u.id = r.user_id
-    WHERE r.event_id = ? ORDER BY CASE r.status WHEN 'yes' THEN 0 WHEN 'maybe' THEN 1 ELSE 2 END, u.name`).all(ev.id);
+  const attendees = db.prepare(`SELECT u.id AS user_id, u.name, r.status, r.guests, r.note FROM rsvps r JOIN users u ON u.id = r.user_id
+    WHERE r.event_id = ? ORDER BY CASE r.status WHEN 'yes' THEN 0 WHEN 'maybe' THEN 1 ELSE 2 END, u.name`).all(ev.id)
+    .map(a => ({ ...a, companions: companionsFor(ev.id, a.user_id).map(c => c.name) }));
   const products = db.prepare('SELECT * FROM products WHERE event_id = ? AND active = 1 ORDER BY id').all(ev.id)
     .map(p => ({ ...p, sizeList: (p.sizes || '').split(',').map(s => s.trim()).filter(Boolean), sold: soldQty(p.id) }));
   const myOrders = db.prepare('SELECT * FROM orders WHERE event_id = ? AND user_id = ? ORDER BY id DESC').all(ev.id, req.user.id)
     .map(o => ({ ...o, items: db.prepare('SELECT oi.*, p.name FROM order_items oi JOIN products p ON p.id = oi.product_id WHERE order_id = ?').all(o.id) }));
   const base = `${req.protocol}://${req.get('host')}`;
+  const url = `${base}/eventos/${ev.id}`;
   const rsvpClosed = ev.rsvp_deadline ? h.isPast(ev.rsvp_deadline) : h.isPast(ev.ends_at || ev.starts_at);
-  res.render('event', { title: ev.title, ev, stats, myRsvp, attendees, products, myOrders, rsvpClosed,
-    gcal: h.googleCalUrl(ev, `${base}/eventos/${ev.id}`) });
+  const dates = eventDates(ev.id).map(d => ({
+    ...d,
+    going: db.prepare('SELECT COUNT(*) AS n FROM date_rsvps WHERE date_id = ?').get(d.id).n,
+    names: db.prepare('SELECT u.name FROM date_rsvps dr JOIN users u ON u.id = dr.user_id WHERE dr.date_id = ? ORDER BY u.name').all(d.id).map(x => x.name),
+    gcal: h.googleCalUrl(ev, url, d),
+  }));
+  const myDates = new Set(db.prepare('SELECT dr.date_id FROM date_rsvps dr JOIN event_dates d ON d.id = dr.date_id WHERE d.event_id = ? AND dr.user_id = ?').all(ev.id, req.user.id).map(x => x.date_id));
+  const members = household(req.user.id);
+  const myCompanions = new Set(companionsFor(ev.id, req.user.id).map(c => c.id));
+  res.render('event', { title: ev.title, ev, stats, myRsvp, attendees, products, myOrders, rsvpClosed, dates, myDates, members, myCompanions,
+    gcal: h.googleCalUrl(ev, url) });
 });
 
 function soldQty(productId) {
@@ -88,20 +103,46 @@ r.post('/eventos/:id/asistencia', requireLogin, loadEvent, (req, res) => {
   if (!status) return res.redirect(`/eventos/${ev.id}`);
   const closed = ev.rsvp_deadline ? h.isPast(ev.rsvp_deadline) : h.isPast(ev.ends_at || ev.starts_at);
   if (closed) { req.flash('bad', 'Ya cerró el plazo para confirmar asistencia.'); return res.redirect(`/eventos/${ev.id}`); }
-  const guests = Math.max(0, Math.min(20, parseInt(req.body.guests || '0', 10) || 0));
-  db.prepare(`INSERT INTO rsvps (event_id, user_id, status, guests, note) VALUES (?, ?, ?, ?, ?)
-    ON CONFLICT(event_id, user_id) DO UPDATE SET status = excluded.status, guests = excluded.guests, note = excluded.note, updated_at = datetime('now','localtime')`)
-    .run(ev.id, req.user.id, status, status === 'yes' ? guests : 0, String(req.body.note || '').trim().slice(0, 300) || null);
-  req.flash('ok', status === 'yes' ? '¡Asistencia confirmada! Puedes agregar el evento a tu calendario.' : 'Respuesta guardada.');
+  const extra = Math.max(0, Math.min(20, parseInt(req.body.guests || '0', 10) || 0));
+  // Acompañantes del núcleo familiar (member_ids[])
+  const mine = new Set(household(req.user.id).map(m => m.id));
+  const rawM = req.body.member_ids === undefined ? [] : (Array.isArray(req.body.member_ids) ? req.body.member_ids : [req.body.member_ids]);
+  const companions = status === 'yes' ? rawM.map(Number).filter(id => mine.has(id)) : [];
+  const guests = status === 'yes' ? companions.length + extra : 0;
+  db.prepare(`INSERT INTO rsvps (event_id, user_id, status, guests, extra_guests, note) VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(event_id, user_id) DO UPDATE SET status = excluded.status, guests = excluded.guests, extra_guests = excluded.extra_guests, note = excluded.note, updated_at = datetime('now','localtime')`)
+    .run(ev.id, req.user.id, status, guests, status === 'yes' ? extra : 0, String(req.body.note || '').trim().slice(0, 300) || null);
+  db.transaction(() => {
+    db.prepare('DELETE FROM rsvp_companions WHERE event_id = ? AND user_id = ?').run(ev.id, req.user.id);
+    for (const id of companions) db.prepare('INSERT OR IGNORE INTO rsvp_companions (event_id, user_id, member_id) VALUES (?, ?, ?)').run(ev.id, req.user.id, id);
+  })();
+  // Fechas seleccionadas (checkboxes date_ids[]); en eventos de una sola fecha, "Sí" = esa fecha
+  const dates = eventDates(ev.id);
+  const valid = new Set(dates.map(d => d.id));
+  let chosen = [];
+  if (status === 'yes') {
+    const raw = req.body.date_ids === undefined ? [] : (Array.isArray(req.body.date_ids) ? req.body.date_ids : [req.body.date_ids]);
+    chosen = raw.map(Number).filter(id => valid.has(id));
+    if (dates.length === 1) chosen = [dates[0].id];
+    if (!chosen.length) { req.flash('bad', 'Marca al menos una fecha a la que vas a asistir.'); return res.redirect(`/eventos/${ev.id}#asistencia`); }
+  }
+  db.transaction(() => {
+    db.prepare('DELETE FROM date_rsvps WHERE user_id = ? AND date_id IN (SELECT id FROM event_dates WHERE event_id = ?)').run(req.user.id, ev.id);
+    for (const id of chosen) db.prepare('INSERT OR IGNORE INTO date_rsvps (date_id, user_id) VALUES (?, ?)').run(id, req.user.id);
+  })();
+  req.flash('ok', status === 'yes' ? (dates.length > 1 ? `¡Listo! Confirmaste ${chosen.length} de ${dates.length} fechas.` : '¡Asistencia confirmada! Puedes agregar el evento a tu calendario.') : 'Respuesta guardada.');
   res.redirect(`/eventos/${ev.id}#asistencia`);
 });
 
 // Archivo .ics para agendar
 r.get('/eventos/:id/calendario.ics', requireLogin, loadEvent, (req, res) => {
   const base = `${req.protocol}://${req.get('host')}`;
+  let dates = eventDates(req.event.id);
+  if (req.query.fecha) dates = dates.filter(d => d.id === Number(req.query.fecha));
+  if (req.query.mias) { const mine = new Set(db.prepare('SELECT date_id FROM date_rsvps WHERE user_id = ?').all(req.user.id).map(x => x.date_id)); dates = dates.filter(d => mine.has(d.id)); }
   res.set('Content-Type', 'text/calendar; charset=utf-8');
   res.set('Content-Disposition', `attachment; filename="evento-${req.event.id}.ics"`);
-  res.send(h.buildICS(req.event, settings.get('site_name'), `${base}/eventos/${req.event.id}`));
+  res.send(h.buildICS(req.event, settings.get('site_name'), `${base}/eventos/${req.event.id}`, dates));
 });
 
 module.exports = r;

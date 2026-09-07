@@ -11,7 +11,7 @@
 <div class="flash info">Tienes <%= pendingOrders %> pedido<%= pendingOrders > 1 ? 's' : '' %> pendiente<%= pendingOrders > 1 ? 's' : '' %> de pago. <a href="/pedidos">Ver mis pedidos</a></div>
 <% } %>
 
-<% const card = (e) => { const d = h.parseLocal(e.starts_at); %>
+<% const card = (e) => { const d = h.parseLocal((e.nextDate || e).starts_at); %>
   <a class="card event-card" href="/eventos/<%= e.id %>">
     <div class="img"><% if (e.image) { %><img src="/uploads/<%= e.image %>" alt=""><% } %></div>
     <div class="body">
@@ -21,7 +21,11 @@
         <% } else if (!h.isPast(e.ends_at || e.starts_at)) { %><span class="badge warn">Sin confirmar</span><% } %>
       </div>
       <h2><%= e.title %><% if (e.access_code) { %> <span class="badge muted" title="Evento privado">🔒</span><% } %></h2>
+      <% if (e.dates.length > 1) { %>
+      <div class="muted small">📅 <b><%= e.dates.length %> fechas</b> · próxima: <%= h.fmtDayShort(e.nextDate.starts_at) %>, <%= h.fmtTime(e.nextDate.starts_at) %><% if (e.location) { %> · <%= e.location %><% } %></div>
+      <% } else { %>
       <div class="muted small"><%= h.fmtDateTime(e.starts_at) %><% if (e.location) { %> · <%= e.location %><% } %></div>
+      <% } %>
       <div class="row small muted" style="margin-top:auto">
         <span>👥 <%= e.stats.going + e.stats.guests %> asistirán</span>
         <% if (e.stats.products) { %><span>🛍️ <%= e.stats.products %> producto<%= e.stats.products > 1 ? 's' : '' %></span><% } %>

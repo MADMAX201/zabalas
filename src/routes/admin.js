@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const ExcelJS = require('exceljs');
 const bcrypt = require('bcryptjs');
-const { db, settings, DATA_DIR } = require('../db');
+const { db, settings, DATA_DIR, syncEventRange, eventDates, companionsFor } = require('../db');
 const { requireAdmin, upload, csrfCheck } = require('../middleware');
 const h = require('../helpers');
 
@@ -57,7 +57,8 @@ r.post('/eventos/nuevo', upload.single('image'), csrfCheck, (req, res) => {
   const info = db.prepare(`INSERT INTO events (title, description, starts_at, ends_at, location, address, rsvp_deadline, published, access_code, image, created_by)
     VALUES (@title, @description, @starts_at, @ends_at, @location, @address, @rsvp_deadline, @published, @access_code, @image, @by)`)
     .run({ ...f, image: req.file ? req.file.filename : null, by: req.user.id });
-  req.flash('ok', 'Evento creado.');
+  db.prepare('INSERT INTO event_dates (event_id, starts_at, ends_at, location, address) VALUES (?, ?, ?, ?, ?)').run(info.lastInsertRowid, f.starts_at, f.ends_at, f.location, f.address);
+  req.flash('ok', 'Evento creado. Puedes agregar más fechas abajo si tiene varias sesiones.');
   res.redirect(`/admin/eventos/${info.lastInsertRowid}`);
 });
 
@@ -69,8 +70,9 @@ function loadEvent(req, res, next) {
 
 r.get('/eventos/:id', loadEvent, (req, res) => {
   const ev = req.event;
-  const attendees = db.prepare(`SELECT u.name, u.email, u.phone, r.status, r.guests, r.note, r.updated_at FROM rsvps r JOIN users u ON u.id=r.user_id
-    WHERE r.event_id = ? ORDER BY CASE r.status WHEN 'yes' THEN 0 WHEN 'maybe' THEN 1 ELSE 2 END, u.name`).all(ev.id);
+  const attendees = db.prepare(`SELECT u.id AS user_id, u.name, u.email, u.phone, r.status, r.guests, r.note, r.updated_at FROM rsvps r JOIN users u ON u.id=r.user_id
+    WHERE r.event_id = ? ORDER BY CASE r.status WHEN 'yes' THEN 0 WHEN 'maybe' THEN 1 ELSE 2 END, u.name`).all(ev.id)
+    .map(a => ({ ...a, companions: companionsFor(ev.id, a.user_id).map(c => c.name) }));
   const products = db.prepare('SELECT * FROM products WHERE event_id = ? ORDER BY id').all(ev.id).map(p => ({
     ...p,
     sold: db.prepare(`SELECT COALESCE(SUM(oi.qty),0) AS n FROM order_items oi JOIN orders o ON o.id=oi.order_id WHERE oi.product_id=? AND o.status IN ('pending','review','paid')`).get(p.id).n,
@@ -90,8 +92,11 @@ r.get('/eventos/:id', loadEvent, (req, res) => {
   // Resumen por producto/talla (solo pagados + en verificación)
   const sizeSummary = db.prepare(`SELECT p.name, oi.size, o.status, SUM(oi.qty) AS qty FROM order_items oi JOIN orders o ON o.id=oi.order_id JOIN products p ON p.id=oi.product_id
     WHERE o.event_id = ? AND o.status IN ('paid','review','pending') GROUP BY p.name, oi.size, o.status ORDER BY p.name, oi.size`).all(ev.id);
+  const dates = eventDates(ev.id).map(d => ({ ...d, going: db.prepare('SELECT COUNT(*) AS n FROM date_rsvps WHERE date_id = ?').get(d.id).n }));
+  const dateRsvps = {};
+  for (const x of db.prepare('SELECT dr.user_id, dr.date_id FROM date_rsvps dr JOIN event_dates d ON d.id = dr.date_id WHERE d.event_id = ?').all(ev.id)) (dateRsvps[x.user_id] = dateRsvps[x.user_id] || new Set()).add(x.date_id);
   const admitted = ev.access_code ? db.prepare('SELECT u.name, a.granted_at FROM event_access a JOIN users u ON u.id=a.user_id WHERE a.event_id=? ORDER BY a.granted_at DESC').all(ev.id) : [];
-  res.render('admin/event', { title: ev.title, ev, attendees, products, orders, totals, sizeSummary, admitted });
+  res.render('admin/event', { title: ev.title, ev, attendees, products, orders, totals, sizeSummary, admitted, dates, dateRsvps });
 });
 
 r.get('/eventos/:id/editar', loadEvent, (req, res) => res.render('admin/event_form', { title: 'Editar evento', ev: req.event, error: null }));
@@ -103,6 +108,11 @@ r.post('/eventos/:id/editar', loadEvent, upload.single('image'), csrfCheck, (req
   if (req.file) { removeFile(req.event.image); image = req.file.filename; }
   db.prepare(`UPDATE events SET title=@title, description=@description, starts_at=@starts_at, ends_at=@ends_at, location=@location, address=@address,
     rsvp_deadline=@rsvp_deadline, published=@published, access_code=@access_code, image=@image WHERE id=@id`).run({ ...f, image, id: req.event.id });
+  // La fecha del formulario es la primera fecha del evento
+  const first = eventDates(req.event.id)[0];
+  if (first) db.prepare('UPDATE event_dates SET starts_at = ?, ends_at = ?, location = COALESCE(?, location), address = COALESCE(?, address) WHERE id = ?').run(f.starts_at, f.ends_at, f.location, f.address, first.id);
+  else db.prepare('INSERT INTO event_dates (event_id, starts_at, ends_at, location, address) VALUES (?, ?, ?, ?, ?)').run(req.event.id, f.starts_at, f.ends_at, f.location, f.address);
+  syncEventRange(req.event.id);
   req.flash('ok', 'Evento actualizado.');
   res.redirect(`/admin/eventos/${req.event.id}`);
 });
@@ -115,6 +125,38 @@ r.post('/eventos/:id/eliminar', loadEvent, (req, res) => {
   files.forEach(removeFile);
   req.flash('ok', 'Evento eliminado.');
   res.redirect('/admin');
+});
+
+// ---------- Fechas del evento ----------
+r.post('/eventos/:id/fechas', loadEvent, (req, res) => {
+  const starts_at = String(req.body.starts_at || '').trim();
+  if (!starts_at) { req.flash('bad', 'La fecha de inicio es obligatoria.'); return res.redirect(`/admin/eventos/${req.event.id}#fechas`); }
+  db.prepare('INSERT INTO event_dates (event_id, label, starts_at, ends_at, location, address) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(req.event.id, String(req.body.label || '').trim().slice(0, 60) || null, starts_at, String(req.body.ends_at || '').trim() || null,
+      String(req.body.location || '').trim() || null, String(req.body.address || '').trim() || null);
+  syncEventRange(req.event.id);
+  req.flash('ok', 'Fecha agregada.');
+  res.redirect(`/admin/eventos/${req.event.id}#fechas`);
+});
+r.post('/fechas/:did/editar', (req, res) => {
+  const d = db.prepare('SELECT * FROM event_dates WHERE id = ?').get(req.params.did);
+  if (!d) return res.redirect('/admin');
+  const starts_at = String(req.body.starts_at || '').trim() || d.starts_at;
+  db.prepare('UPDATE event_dates SET label = ?, starts_at = ?, ends_at = ?, location = ?, address = ? WHERE id = ?')
+    .run(String(req.body.label || '').trim().slice(0, 60) || null, starts_at, String(req.body.ends_at || '').trim() || null,
+      String(req.body.location || '').trim() || null, String(req.body.address || '').trim() || null, d.id);
+  syncEventRange(d.event_id);
+  req.flash('ok', 'Fecha actualizada.');
+  res.redirect(`/admin/eventos/${d.event_id}#fechas`);
+});
+r.post('/fechas/:did/eliminar', (req, res) => {
+  const d = db.prepare('SELECT * FROM event_dates WHERE id = ?').get(req.params.did);
+  if (!d) return res.redirect('/admin');
+  if (db.prepare('SELECT COUNT(*) AS n FROM event_dates WHERE event_id = ?').get(d.event_id).n <= 1) { req.flash('bad', 'El evento debe tener al menos una fecha.'); return res.redirect(`/admin/eventos/${d.event_id}#fechas`); }
+  db.prepare('DELETE FROM event_dates WHERE id = ?').run(d.id);
+  syncEventRange(d.event_id);
+  req.flash('ok', 'Fecha eliminada.');
+  res.redirect(`/admin/eventos/${d.event_id}#fechas`);
 });
 
 // ---------- Productos ----------
@@ -245,12 +287,19 @@ r.get('/eventos/:id/exportar.xlsx', loadEvent, async (req, res) => {
   const header = (ws) => { ws.getRow(1).font = { bold: true }; ws.columns.forEach(c => { c.width = Math.max(14, (c.header || '').length + 4); }); };
 
   const ws1 = wb.addWorksheet('Asistencia');
+  const dates = eventDates(ev.id);
   ws1.columns = [
     { header: 'Nombre', key: 'name' }, { header: 'Correo', key: 'email' }, { header: 'Teléfono', key: 'phone' },
-    { header: 'Respuesta', key: 'status' }, { header: 'Acompañantes', key: 'guests' }, { header: 'Nota', key: 'note' }, { header: 'Actualizado', key: 'updated_at' },
+    { header: 'Respuesta', key: 'status' }, { header: 'Acompañantes', key: 'guests' }, { header: 'Quiénes', key: 'companions' },
+    ...(dates.length > 1 ? dates.map(d => ({ header: (d.label ? d.label + ' ' : '') + h.fmtDayShort(d.starts_at), key: 'd' + d.id })) : []),
+    { header: 'Nota', key: 'note' }, { header: 'Actualizado', key: 'updated_at' },
   ];
-  for (const a of db.prepare('SELECT u.name, u.email, u.phone, r.status, r.guests, r.note, r.updated_at FROM rsvps r JOIN users u ON u.id=r.user_id WHERE r.event_id=? ORDER BY u.name').all(ev.id))
-    ws1.addRow({ ...a, status: h.RSVP[a.status].label });
+  for (const a of db.prepare('SELECT u.id AS uid, u.name, u.email, u.phone, r.status, r.guests, r.note, r.updated_at FROM rsvps r JOIN users u ON u.id=r.user_id WHERE r.event_id=? ORDER BY u.name').all(ev.id)) {
+    const row = { ...a, status: h.RSVP[a.status].label, companions: companionsFor(ev.id, a.uid).map(c => c.name).join(', ') };
+    if (dates.length > 1) for (const d of dates) row['d' + d.id] = db.prepare('SELECT 1 FROM date_rsvps WHERE date_id = ? AND user_id = ?').get(d.id, a.uid) ? 'Sí' : '';
+    ws1.addRow(row);
+  }
+  if (dates.length > 1) { const tot = { name: 'TOTAL' }; for (const d of dates) tot['d' + d.id] = db.prepare('SELECT COUNT(*) AS n FROM date_rsvps WHERE date_id = ?').get(d.id).n; ws1.addRow(tot).font = { bold: true }; }
   header(ws1);
 
   const ws2 = wb.addWorksheet('Pedidos');

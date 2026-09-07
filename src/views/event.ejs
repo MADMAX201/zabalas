@@ -5,7 +5,11 @@
 <div class="row between">
   <div>
     <h1><%= ev.title %><% if (ev.access_code) { %> <span class="badge muted">🔒 Privado</span><% } %></h1>
+    <% if (dates.length > 1) { %>
+    <p>📅 <b><%= dates.length %> fechas</b> · del <%= h.fmtShort(dates[0].starts_at) %> al <%= h.fmtShort(dates[dates.length-1].starts_at) %></p>
+    <% } else { %>
     <p>📅 <b><%= h.fmtDateTime(ev.starts_at) %></b><% if (ev.ends_at) { %> — <%= h.fmtTime(ev.ends_at) %><% } %></p>
+    <% } %>
     <% if (ev.location) { %><p>📍 <%= ev.location %><% if (ev.address) { %> · <a href="https://www.google.com/maps/search/?api=1&query=<%= encodeURIComponent(ev.address) %>" target="_blank" rel="noopener"><%= ev.address %></a><% } %></p><% } %>
     <% if (!ev.published) { %><span class="badge warn">Borrador (solo lo ven administradores)</span><% } %>
   </div>
@@ -33,9 +37,39 @@
         <label><input type="radio" name="status" value="<%= s %>" <%= myRsvp && myRsvp.status === s ? 'checked' : '' %> required><span><%= s==='yes'?'✅ Sí, voy':s==='maybe'?'🤔 Tal vez':'❌ No puedo' %></span></label>
         <% } %>
       </div>
+      <% if (dates.length > 1) { %>
+      <div id="datesBox" class="dates-box" <%= myRsvp && myRsvp.status !== 'yes' ? 'hidden' : '' %>>
+        <div class="row between"><b>¿A cuáles fechas vas?</b>
+          <span class="small"><a href="#" id="datesAll">Todas</a> · <a href="#" id="datesNone">Ninguna</a></span></div>
+        <% dates.forEach(d => { const past = h.isPast(d.ends_at || d.starts_at); %>
+        <label class="date-opt <%= past ? 'past' : '' %>">
+          <input type="checkbox" name="date_ids" value="<%= d.id %>" <%= myDates.has(d.id) || (!myRsvp && !past) ? 'checked' : '' %>>
+          <span class="date-chip sm"><b><%= h.parseLocal(d.starts_at).getDate() %></b><span><%= h.fmtShort(d.starts_at).split(' ')[1] %></span></span>
+          <span class="date-txt">
+            <b><%= d.label ? d.label + ' · ' : '' %><%= h.fmtDayShort(d.starts_at) %>, <%= h.fmtTime(d.starts_at) %><% if (d.ends_at) { %> – <%= h.fmtTime(d.ends_at) %><% } %></b>
+            <span class="small muted"><% if (d.location || ev.location) { %>📍 <%= d.location || ev.location %> · <% } %>👥 <%= d.going %><%= past ? ' · ya pasó' : '' %></span>
+          </span>
+        </label>
+        <% }) %>
+      </div>
+      <% } %>
       <div id="guestsBox" <%= myRsvp && myRsvp.status === 'yes' ? '' : 'hidden' %>>
+        <% if (members.length) { %>
+        <div class="dates-box">
+          <b>¿Quién va contigo?</b>
+          <% members.forEach(mm => { %>
+          <label class="date-opt"><input type="checkbox" name="member_ids" value="<%= mm.id %>" <%= myCompanions.has(mm.id) ? 'checked' : '' %>>
+            <span class="date-txt"><b><%= mm.name %></b><% if (mm.note) { %><span class="small muted"><%= mm.note %></span><% } %></span></label>
+          <% }) %>
+          <div class="help"><a href="/perfil#familia">Editar mi núcleo familiar</a></div>
+        </div>
+        <label for="guests">Otros acompañantes (que no están en la lista)</label>
+        <input id="guests" type="number" name="guests" min="0" max="20" value="<%= myRsvp ? (myRsvp.extra_guests || 0) : 0 %>">
+        <% } else { %>
         <label for="guests">¿Cuántas personas van contigo? (sin contarte)</label>
-        <input id="guests" type="number" name="guests" min="0" max="20" value="<%= myRsvp ? myRsvp.guests : 0 %>">
+        <input id="guests" type="number" name="guests" min="0" max="20" value="<%= myRsvp ? (myRsvp.extra_guests || myRsvp.guests || 0) : 0 %>">
+        <div class="help">¿Siempre vas con las mismas personas? <a href="/perfil#familia">Agrégalas a tu núcleo familiar</a> y las marcas con un clic.</div>
+        <% } %>
       </div>
       <label for="note">Nota (opcional)</label>
       <input id="note" type="text" name="note" maxlength="300" value="<%= myRsvp && myRsvp.note ? myRsvp.note : '' %>" placeholder="Llego tarde, llevo postre...">
@@ -46,16 +80,34 @@
 
     <% if (!past) { %>
     <h3 class="mt2">Agendar</h3>
+    <% if (dates.length > 1) { %>
+    <div class="row">
+      <% if (myDates.size) { %><a class="btn sec sm" href="/eventos/<%= ev.id %>/calendario.ics?mias=1">📥 Mis fechas (<%= myDates.size %>) al calendario</a><% } %>
+      <a class="btn ghost sm" href="/eventos/<%= ev.id %>/calendario.ics">📥 Todas las fechas</a>
+    </div>
+    <details class="mt"><summary class="small muted" style="cursor:pointer">Agendar una por una / Google Calendar</summary>
+      <table class="tbl small mt">
+        <% dates.forEach(d => { %><tr><td><%= d.label ? d.label + ' · ' : '' %><%= h.fmtDayShort(d.starts_at) %>, <%= h.fmtTime(d.starts_at) %></td>
+          <td class="right"><a href="/eventos/<%= ev.id %>/calendario.ics?fecha=<%= d.id %>">📥 .ics</a> · <a href="<%= d.gcal %>" target="_blank" rel="noopener">📆 Google</a></td></tr><% }) %>
+      </table>
+    </details>
+    <% } else { %>
     <div class="row">
       <a class="btn sec sm" href="/eventos/<%= ev.id %>/calendario.ics">📥 Calendario (iPhone / Outlook)</a>
       <a class="btn sec sm" href="<%= gcal %>" target="_blank" rel="noopener">📆 Google Calendar</a>
     </div>
     <% } %>
+    <% } %>
 
-    <% if (attendees.length) { %>
+    <% if (dates.length > 1 && dates.some(d => d.going)) { %>
+    <h3 class="mt2">Quiénes van por fecha</h3>
+    <% dates.forEach(d => { if (!d.going) return; %>
+      <p class="small" style="margin:4px 0"><b><%= d.label ? d.label + ' · ' : '' %><%= h.fmtDayShort(d.starts_at) %></b> (<%= d.going %>): <%= d.names.join(', ') %></p>
+    <% }) %>
+    <% } else if (attendees.length) { %>
     <h3 class="mt2">Quiénes van</h3>
     <div class="avatar-list">
-      <% attendees.filter(a => a.status === 'yes').forEach(a => { %><span><%= a.name %><% if (a.guests) { %> +<%= a.guests %><% } %></span><% }) %>
+      <% attendees.filter(a => a.status === 'yes').forEach(a => { %><span title="<%= a.companions.join(', ') %>"><%= a.name %><% if (a.companions.length) { %> + <%= a.companions.join(', ') %><% } %><% if (a.guests - a.companions.length > 0) { %> +<%= a.guests - a.companions.length %><% } %></span><% }) %>
     </div>
     <% const maybe = attendees.filter(a => a.status === 'maybe'); if (maybe.length) { %>
       <p class="small muted mt">Tal vez: <%= maybe.map(a => a.name).join(', ') %></p>

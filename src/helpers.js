@@ -22,6 +22,10 @@ function fmtTime(iso) {
   return `${h}:${m} ${ampm}`;
 }
 function fmtDateTime(iso) { return iso ? `${fmtDate(iso)}, ${fmtTime(iso)}` : ''; }
+function fmtDayShort(iso) {
+  const dt = parseLocal(iso); if (!dt) return '';
+  return `${DIAS[dt.getDay()].slice(0,3)} ${dt.getDate()} ${MESES[dt.getMonth()].slice(0,3)}`;
+}
 function fmtShort(iso) {
   const dt = parseLocal(iso); if (!dt) return '';
   return `${dt.getDate()} ${MESES[dt.getMonth()].slice(0,3)} ${dt.getFullYear()}`;
@@ -40,21 +44,26 @@ function icsUTC(iso) {
 }
 function icsEscape(s) { return String(s || '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n'); }
 
-function buildICS(ev, siteName, url) {
-  const start = icsUTC(ev.starts_at);
-  const end = icsUTC(ev.ends_at) || icsUTC(addHours(ev.starts_at, 3));
-  return [
-    'BEGIN:VCALENDAR', 'VERSION:2.0', `PRODID:-//${icsEscape(siteName)}//ES`, 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH',
-    'BEGIN:VEVENT',
-    `UID:event-${ev.id}@zabalas.online`,
-    `DTSTAMP:${icsUTC(nowLocalISO())}`,
-    `DTSTART:${start}`, `DTEND:${end}`,
-    `SUMMARY:${icsEscape(ev.title)}`,
-    `DESCRIPTION:${icsEscape((ev.description || '') + (url ? '\n' + url : ''))}`,
-    `LOCATION:${icsEscape([ev.location, ev.address].filter(Boolean).join(', '))}`,
-    url ? `URL:${url}` : '',
-    'END:VEVENT', 'END:VCALENDAR',
-  ].filter(Boolean).join('\r\n');
+// ev: evento; dates: lista de fechas (cada una con starts_at, ends_at, location, address, label, id)
+function buildICS(ev, siteName, url, dates) {
+  const list = dates && dates.length ? dates : [{ id: 0, starts_at: ev.starts_at, ends_at: ev.ends_at, location: ev.location, address: ev.address }];
+  const vevents = list.map(d => {
+    const start = icsUTC(d.starts_at);
+    const end = icsUTC(d.ends_at) || icsUTC(addHours(d.starts_at, 3));
+    const title = d.label ? `${ev.title} · ${d.label}` : ev.title;
+    return [
+      'BEGIN:VEVENT',
+      `UID:event-${ev.id}-${d.id}@zabalas.online`,
+      `DTSTAMP:${icsUTC(nowLocalISO())}`,
+      `DTSTART:${start}`, `DTEND:${end}`,
+      `SUMMARY:${icsEscape(title)}`,
+      `DESCRIPTION:${icsEscape((ev.description || '') + (url ? '\n' + url : ''))}`,
+      `LOCATION:${icsEscape([d.location || ev.location, d.address || ev.address].filter(Boolean).join(', '))}`,
+      url ? `URL:${url}` : '',
+      'END:VEVENT',
+    ].filter(Boolean).join('\r\n');
+  });
+  return ['BEGIN:VCALENDAR', 'VERSION:2.0', `PRODID:-//${icsEscape(siteName)}//ES`, 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH', ...vevents, 'END:VCALENDAR'].join('\r\n');
 }
 function addHours(iso, h) {
   const dt = parseLocal(iso); if (!dt) return null;
@@ -62,13 +71,14 @@ function addHours(iso, h) {
   const p = n => String(n).padStart(2, '0');
   return `${dt.getFullYear()}-${p(dt.getMonth()+1)}-${p(dt.getDate())}T${p(dt.getHours())}:${p(dt.getMinutes())}`;
 }
-function googleCalUrl(ev, url) {
-  const start = icsUTC(ev.starts_at);
-  const end = icsUTC(ev.ends_at) || icsUTC(addHours(ev.starts_at, 3));
+function googleCalUrl(ev, url, d) {
+  d = d || ev;
+  const start = icsUTC(d.starts_at);
+  const end = icsUTC(d.ends_at) || icsUTC(addHours(d.starts_at, 3));
   const q = new URLSearchParams({
-    action: 'TEMPLATE', text: ev.title, dates: `${start}/${end}`,
+    action: 'TEMPLATE', text: d.label ? `${ev.title} · ${d.label}` : ev.title, dates: `${start}/${end}`,
     details: (ev.description || '') + (url ? '\n' + url : ''),
-    location: [ev.location, ev.address].filter(Boolean).join(', '),
+    location: [d.location || ev.location, d.address || ev.address].filter(Boolean).join(', '),
   });
   return 'https://calendar.google.com/calendar/render?' + q.toString();
 }
@@ -86,4 +96,4 @@ const RSVP = {
   no: { label: 'No asistiré', cls: 'muted' },
 };
 
-module.exports = { fmtDate, fmtTime, fmtDateTime, fmtShort, fmtCOP, isPast, nowLocalISO, buildICS, googleCalUrl, ORDER_STATUS, RSVP, parseLocal };
+module.exports = { fmtDate, fmtTime, fmtDateTime, fmtShort, fmtDayShort, fmtCOP, isPast, nowLocalISO, buildICS, googleCalUrl, ORDER_STATUS, RSVP, parseLocal };

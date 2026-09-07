@@ -8,13 +8,14 @@
     <label>Título *</label><input type="text" name="title" value="<%= ev.title || '' %>" required>
     <label>Descripción</label><textarea name="description"><%= ev.description || '' %></textarea>
     <div class="grid two">
-      <div><label>Inicio *</label><input type="datetime-local" name="starts_at" value="<%= ev.starts_at || '' %>" required></div>
+      <div><label>Inicio * <span class="muted small">(primera fecha)</span></label><input type="datetime-local" name="starts_at" value="<%= ev.starts_at || '' %>" required></div>
       <div><label>Fin (opcional)</label><input type="datetime-local" name="ends_at" value="<%= ev.ends_at || '' %>"></div>
     </div>
     <div class="grid two">
       <div><label>Lugar</label><input type="text" name="location" value="<%= ev.location || '' %>" placeholder="Finca La Esperanza"></div>
       <div><label>Dirección (abre en Google Maps)</label><input type="text" name="address" value="<%= ev.address || '' %>" placeholder="Km 5 vía Melgar"></div>
     </div>
+    <div class="help">¿El evento tiene varias fechas (ensayos, partidos)? Guarda y agrégalas en la sección "Fechas del evento".</div>
     <label>Fecha límite para confirmar asistencia (opcional)</label><input type="datetime-local" name="rsvp_deadline" value="<%= ev.rsvp_deadline || '' %>">
     <div class="help">Si se deja vacía, se puede confirmar hasta que termine el evento.</div>
     <label>Imagen de portada</label>

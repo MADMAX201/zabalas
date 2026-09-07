@@ -3,8 +3,12 @@
   // Mostrar campo de acompañantes solo si "Sí, voy"
   const rsvp = document.getElementById('rsvpForm');
   if (rsvp) {
-    const box = document.getElementById('guestsBox');
-    rsvp.querySelectorAll('input[name=status]').forEach(r => r.addEventListener('change', () => { box.hidden = r.value !== 'yes' || !r.checked; }));
+    const box = document.getElementById('guestsBox'), dbox = document.getElementById('datesBox');
+    rsvp.querySelectorAll('input[name=status]').forEach(r => r.addEventListener('change', () => { const yes = r.value === 'yes' && r.checked; box.hidden = !yes; if (dbox) dbox.hidden = !yes; }));
+    const all = document.getElementById('datesAll'), none = document.getElementById('datesNone');
+    const setAll = v => rsvp.querySelectorAll('input[name=date_ids]').forEach(c => { c.checked = v; });
+    if (all) all.addEventListener('click', e => { e.preventDefault(); setAll(true); });
+    if (none) none.addEventListener('click', e => { e.preventDefault(); setAll(false); });
   }
 
   // Tienda: líneas de pedido

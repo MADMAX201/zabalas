@@ -117,6 +117,33 @@ CREATE INDEX IF NOT EXISTS idx_media_vis ON media(visibility, created_at);
 `);
 fs.mkdirSync(path.join(DATA_DIR, 'uploads', 'galeria'), { recursive: true });
 
+// Fechas múltiples por evento (sesiones). events.starts_at/ends_at se mantienen como rango total (min/max) para ordenar.
+db.exec(`
+CREATE TABLE IF NOT EXISTS event_dates (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  label TEXT,                                 -- "Ensayo 1", "Final", opcional
+  starts_at TEXT NOT NULL,
+  ends_at TEXT,
+  location TEXT,
+  address TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_event_dates_ev ON event_dates(event_id, starts_at);
+CREATE TABLE IF NOT EXISTS date_rsvps (
+  date_id INTEGER NOT NULL REFERENCES event_dates(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  PRIMARY KEY (date_id, user_id)
+);
+`);
+// Migración: cada evento existente sin fechas recibe una a partir de su fecha original
+for (const ev of db.prepare('SELECT * FROM events WHERE id NOT IN (SELECT DISTINCT event_id FROM event_dates)').all()) {
+  db.prepare('INSERT INTO event_dates (event_id, starts_at, ends_at, location, address) VALUES (?, ?, ?, ?, ?)').run(ev.id, ev.starts_at, ev.ends_at, ev.location, ev.address);
+  // Quien ya había confirmado asistencia queda marcado en esa única fecha
+  const d = db.prepare('SELECT id FROM event_dates WHERE event_id = ?').get(ev.id);
+  for (const r of db.prepare("SELECT user_id FROM rsvps WHERE event_id = ? AND status = 'yes'").all(ev.id))
+    db.prepare('INSERT OR IGNORE INTO date_rsvps (date_id, user_id) VALUES (?, ?)').run(d.id, r.user_id);
+}
+
 // ---- Ajustes por defecto ----
 const defaults = {
   family_code: process.env.FAMILY_CODE || 'ZABALA2026',
@@ -147,4 +174,35 @@ const settings = {
   set(key, value) { db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, value); },
 };
 
-module.exports = { db, settings, DATA_DIR };
+// Núcleo familiar de cada integrante y acompañantes por evento
+db.exec(`
+CREATE TABLE IF NOT EXISTS household_members (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  note TEXT,                                  -- "hija", "esposo", talla... opcional
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE TABLE IF NOT EXISTS rsvp_companions (
+  event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  member_id INTEGER NOT NULL REFERENCES household_members(id) ON DELETE CASCADE,
+  PRIMARY KEY (event_id, user_id, member_id)
+);
+`);
+if (!cols('rsvps').includes('extra_guests')) db.exec('ALTER TABLE rsvps ADD COLUMN extra_guests INTEGER NOT NULL DEFAULT 0');
+function household(userId) { return db.prepare('SELECT * FROM household_members WHERE user_id = ? ORDER BY id').all(userId); }
+function companionsFor(eventId, userId) {
+  return db.prepare('SELECT m.id, m.name FROM rsvp_companions c JOIN household_members m ON m.id = c.member_id WHERE c.event_id = ? AND c.user_id = ? ORDER BY m.id').all(eventId, userId);
+}
+
+// Recalcula el rango del evento a partir de sus fechas
+function syncEventRange(eventId) {
+  const r = db.prepare('SELECT MIN(starts_at) AS s, MAX(COALESCE(ends_at, starts_at)) AS e FROM event_dates WHERE event_id = ?').get(eventId);
+  if (r && r.s) db.prepare('UPDATE events SET starts_at = ?, ends_at = ? WHERE id = ?').run(r.s, r.e === r.s ? null : r.e, eventId);
+}
+function eventDates(eventId) {
+  return db.prepare('SELECT * FROM event_dates WHERE event_id = ? ORDER BY starts_at').all(eventId);
+}
+
+module.exports = { db, settings, DATA_DIR, syncEventRange, eventDates, household, companionsFor };

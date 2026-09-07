@@ -1,6 +1,6 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
-const { db, settings } = require('../db');
+const { db, settings, household } = require('../db');
 const { requireLogin } = require('../middleware');
 
 const r = express.Router();
@@ -75,18 +75,33 @@ r.post('/registro', (req, res) => {
 r.post('/logout', (req, res) => { req.session.destroy(() => res.redirect('/login')); });
 
 // Perfil
-r.get('/perfil', requireLogin, (req, res) => res.render('profile', { title: 'Mi perfil', error: null }));
+r.get('/perfil', requireLogin, (req, res) => res.render('profile', { title: 'Mi perfil', error: null, members: household(req.user.id) }));
 r.post('/perfil', requireLogin, (req, res) => {
   const name = String(req.body.name || '').trim();
   const phone = String(req.body.phone || '').trim();
-  if (name.length < 2) return res.status(400).render('profile', { title: 'Mi perfil', error: 'Escribe tu nombre.' });
+  if (name.length < 2) return res.status(400).render('profile', { title: 'Mi perfil', error: 'Escribe tu nombre.', members: household(req.user.id) });
   db.prepare('UPDATE users SET name = ?, phone = ? WHERE id = ?').run(name, phone || null, req.user.id);
   if (req.body.password) {
-    if (String(req.body.password).length < 6) return res.status(400).render('profile', { title: 'Mi perfil', error: 'La nueva contraseña debe tener al menos 6 caracteres.' });
+    if (String(req.body.password).length < 6) return res.status(400).render('profile', { title: 'Mi perfil', error: 'La nueva contraseña debe tener al menos 6 caracteres.', members: household(req.user.id) });
     db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(String(req.body.password), 10), req.user.id);
   }
   req.flash('ok', 'Perfil actualizado.');
   res.redirect('/perfil');
+});
+
+// Núcleo familiar (personas que suelen ir conmigo)
+r.post('/perfil/familia', requireLogin, (req, res) => {
+  const name = String(req.body.name || '').trim().slice(0, 80);
+  if (name.length < 2) { req.flash('bad', 'Escribe el nombre.'); return res.redirect('/perfil#familia'); }
+  if (household(req.user.id).length >= 20) { req.flash('bad', 'Máximo 20 personas en tu núcleo.'); return res.redirect('/perfil#familia'); }
+  db.prepare('INSERT INTO household_members (user_id, name, note) VALUES (?, ?, ?)').run(req.user.id, name, String(req.body.note || '').trim().slice(0, 60) || null);
+  req.flash('ok', `${name} agregado/a a tu núcleo familiar.`);
+  res.redirect('/perfil#familia');
+});
+r.post('/perfil/familia/:id/eliminar', requireLogin, (req, res) => {
+  db.prepare('DELETE FROM household_members WHERE id = ? AND user_id = ?').run(req.params.id, req.user.id);
+  req.flash('ok', 'Eliminado de tu núcleo familiar.');
+  res.redirect('/perfil#familia');
 });
 
 module.exports = r;

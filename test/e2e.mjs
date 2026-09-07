@@ -118,6 +118,53 @@ ok(/\/eventos\/2$/.test(m.url()) && (await m.textContent('body')).includes('Cump
 await m.goto(BASE + '/'); ok((await m.textContent('body')).includes('Cumpleaños sorpresa'), 'ahora sí aparece en su lista');
 await m.screenshot({ path: `${shots}/12-evento-privado.png` });
 
+// --- Núcleo familiar y acompañantes ---
+await m.goto(BASE + '/perfil');
+await m.fill('form[action="/perfil/familia"] [name=name]', 'Tomás'); await m.fill('form[action="/perfil/familia"] [name=note]', 'hijo'); await m.click('form[action="/perfil/familia"] button');
+await m.fill('form[action="/perfil/familia"] [name=name]', 'Sofía'); await m.click('form[action="/perfil/familia"] button');
+ok((await m.$$('form[action^="/perfil/familia/"]')).length === 2, 'núcleo familiar con 2 personas');
+await m.goto(BASE + '/eventos/1');
+ok((await m.$$('input[name=member_ids]')).length === 2, 'asistencia muestra a Tomás y Sofía');
+await m.click('label:has(input[value=yes]) span');
+await m.check('input[name=member_ids][value="1"]'); await m.fill('#guests', '1'); await m.click('#rsvpForm button.btn');
+let body = await m.textContent('body');
+ok(body.includes('Laura Zabala + Tomás +1'), 'quiénes van muestra acompañante por nombre y extra');
+await m.screenshot({ path: `${shots}/16-acompanantes.png`, fullPage: true });
+await admin.goto(BASE + '/admin/eventos/1');
+ok((await admin.textContent('body')).includes('Tomás'), 'admin ve nombre del acompañante');
+ok((await admin.textContent('#asistencia')).includes('2'), 'total acompañantes = 2');
+
+// --- Evento con varias fechas ---
+await admin.goto(BASE + '/admin/eventos/nuevo');
+await admin.fill('[name=title]', 'Ensayos del coro navideño'); await admin.fill('[name=starts_at]', '2026-12-01T19:00'); await admin.fill('[name=location]', 'Casa de Tía Marta');
+await admin.click('button.btn');
+ok(/\/admin\/eventos\/3$/.test(admin.url()), 'evento coro creado');
+for (const [label, when] of [['Ensayo 2', '2026-12-08T19:00'], ['Ensayo 3', '2026-12-15T19:00'], ['Presentación', '2026-12-20T18:00']]) {
+  await admin.fill('#dfnew [name=label], [form=dfnew][name=label]', label); await admin.fill('[form=dfnew][name=starts_at]', when);
+  if (label === 'Presentación') await admin.fill('[form=dfnew][name=location]', 'Iglesia');
+  await admin.click('button[form=dfnew]');
+}
+ok((await admin.$$('form[action^="/admin/fechas/"][action$="/editar"]')).length === 4, 'evento con 4 fechas');
+await admin.screenshot({ path: `${shots}/14-admin-fechas.png`, fullPage: true });
+await m.goto(BASE + '/');
+ok((await m.textContent('body')).includes('4 fechas'), 'tarjeta muestra 4 fechas');
+await m.goto(BASE + '/eventos/3');
+ok((await m.$$('input[name=date_ids]')).length === 4, 'recuadro con 4 casillas');
+await m.click('label:has(input[value=yes]) span');
+const boxes = await m.$$('input[name=date_ids]'); await boxes[1].uncheck(); await boxes[2].uncheck();
+await m.screenshot({ path: `${shots}/15-movil-fechas.png`, fullPage: true });
+await m.click('#rsvpForm button.btn');
+ok((await m.textContent('body')).includes('Confirmaste 2 de 4 fechas'), 'asistencia a 2 de 4 fechas');
+const icsMine = await (await m.request.get(BASE + '/eventos/3/calendario.ics?mias=1')).text();
+ok((icsMine.match(/BEGIN:VEVENT/g) || []).length === 2, 'ics de mis fechas tiene 2 eventos');
+const icsAll = await (await m.request.get(BASE + '/eventos/3/calendario.ics')).text();
+ok((icsAll.match(/BEGIN:VEVENT/g) || []).length === 4 && icsAll.includes('Presentación'), 'ics completo tiene 4 eventos');
+await admin.goto(BASE + '/admin/eventos/3');
+ok((await admin.$$('td:has-text("✅")')).length === 2, 'admin ve 2 fechas marcadas');
+const xls3 = await admin.request.get(BASE + '/admin/eventos/3/exportar.xlsx'); ok(xls3.status() === 200, 'excel con columnas por fecha');
+// evento de una sola fecha sigue igual
+await m.goto(BASE + '/eventos/1'); ok((await m.$$('input[name=date_ids]')).length === 0, 'evento de una fecha no muestra casillas');
+
 // --- Galería ---
 await m.goto(BASE + '/galeria/subir?evento=1');
 await m.setInputFiles('#files', ['public/img/logo.jpeg', 'test/shots/01-login.png']);

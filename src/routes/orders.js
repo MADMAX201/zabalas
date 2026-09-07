@@ -1,7 +1,7 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const { db, DATA_DIR } = require('../db');
+const { db, DATA_DIR, household } = require('../db');
 const { requireLogin, upload, csrfCheck } = require('../middleware');
 const h = require('../helpers');
 const { soldQty } = require('./events');
@@ -85,7 +85,7 @@ r.get('/pedidos/:id/editar', requireLogin, loadOrder, (req, res) => {
     const own = o.items.filter(i => i.product_id === p.id).reduce((s, i) => s + i.qty, 0);
     return { ...p, sold: p.sold - own };
   });
-  res.render('order_edit', { title: `Editar pedido #${o.id}`, o, products });
+  res.render('order_edit', { title: `Editar pedido #${o.id}`, o, products, members: household(req.user.id) });
 });
 r.post('/pedidos/:id/editar', requireLogin, loadOrder, (req, res) => {
   const o = req.order;
