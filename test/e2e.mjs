@@ -75,9 +75,10 @@ await m.screenshot({ path: `${shots}/07b-movil-editar.png`, fullPage: true });
 await m.click('#orderBtn');
 ok(/\/pedidos\/1$/.test(m.url()) && (await m.textContent('body')).includes('135.000'), 'pedido actualizado a 135.000');
 ok((await m.textContent('body')).includes('talla L'), 'talla cambiada a L');
-await m.setInputFiles('#receipt', 'public/img/logo.jpeg'); await m.fill('#ref', 'M98765');
-await m.click('form[enctype] button.btn');
-ok((await m.textContent('body')).includes('Comprobante recibido'), 'comprobante subido');
+// abono parcial de 50.000 sobre 135.000
+await m.fill('#amount', '50000'); await m.setInputFiles('#receipt', 'public/img/logo.jpeg'); await m.fill('#ref', 'M98765');
+await m.click('#abonoBtn');
+ok((await m.textContent('body')).includes('Abono de $50.000 recibido') && (await m.textContent('body')).includes('En verificación'), 'abono parcial subido');
 await m.screenshot({ path: `${shots}/08-movil-verificacion.png`, fullPage: true });
 
 // --- Admin confirma pago ---
@@ -85,10 +86,19 @@ await admin.goto(BASE + '/admin');
 ok((await admin.textContent('body')).includes('Pagos por verificar'), 'dashboard muestra por verificar');
 await admin.screenshot({ path: `${shots}/09-admin-dashboard.png`, fullPage: true });
 await admin.goto(BASE + '/admin/pedidos?estado=review');
-await admin.click('button[value=paid]');
-ok((await admin.textContent('body')).includes('Pagado'), 'pago confirmado');
+await admin.click('button[value=confirmed]');
+ok((await admin.textContent('body')).includes('Abonado parcialmente') && (await admin.textContent('body')).includes('$50.000 de $135.000'), 'abono confirmado, pedido parcial');
 await admin.screenshot({ path: `${shots}/10-admin-pedidos.png`, fullPage: true });
-await m.reload(); ok((await m.textContent('body')).includes('Pago confirmado'), 'integrante ve pago confirmado');
+await m.reload(); let ob = await m.textContent('body');
+ok(ob.includes('saldo') && ob.includes('$85.000') && ob.includes('Confirmado'), 'integrante ve saldo 85.000');
+await m.screenshot({ path: `${shots}/08b-abonos.png`, fullPage: true });
+// admin registra abono manual en efectivo por el saldo
+await admin.goto(BASE + '/admin/pedidos?estado=partial');
+await admin.click('details summary');
+await admin.fill('form[action="/admin/pedidos/1/abono"] [name=amount]', '85000'); await admin.selectOption('form[action="/admin/pedidos/1/abono"] [name=method]', 'cash');
+await admin.fill('form[action="/admin/pedidos/1/abono"] [name=note]', 'Efectivo entregado a Mario'); await admin.click('form[action="/admin/pedidos/1/abono"] button[value=add]');
+ok((await admin.textContent('body')).includes('Pedido #1: Pagado'), 'abono manual en efectivo completa el pedido');
+await m.reload(); ok((await m.textContent('body')).includes('Pago completo') && (await m.textContent('body')).includes('Efectivo'), 'integrante ve pago completo con abono en efectivo');
 
 // admin elimina un pedido pendiente (y no puede eliminar uno pagado)
 await m.goto(BASE + '/eventos/1'); await m.click('.product[data-product="2"] .add-line'); await m.click('#orderBtn');
@@ -224,13 +234,47 @@ await m.screenshot({ path: `${shots}/18-organizador.png`, fullPage: true });
 // Pedro entra con el código, pide, y ve el pago Bre-B del organizador
 await p3.goto(BASE + `/eventos/${orgId}`); await p3.fill('#code', code[1]); await p3.click('button.btn');
 await p3.click('.product .add-line'); await p3.click('#orderBtn');
-let pb = await p3.textContent('body'); ok(pb.includes('Paga por Bre-B') && pb.includes('@laurazabala'), 'pedido muestra Bre-B del organizador');
-await p3.setInputFiles('#receipt', 'public/img/logo.jpeg'); await p3.click('form[enctype] button.btn');
-// organizador confirma el pago
-await m.goto(BASE + `/admin/eventos/${orgId}`); await m.click('button[value=paid]');
+let pb = await p3.textContent('body'); ok(pb.includes('Abonar por Bre-B') && pb.includes('@laurazabala'), 'pedido muestra Bre-B del organizador');
+await p3.setInputFiles('#receipt', 'public/img/logo.jpeg'); await p3.click('#abonoBtn');
+// organizador confirma el abono (total)
+await m.goto(BASE + `/admin/eventos/${orgId}`); await m.click('button[value=confirmed]');
 ok((await m.textContent('body')).includes('Pagado'), 'organizador confirmó pago');
 await m.goto(BASE + '/mis-eventos'); ok((await m.textContent('body')).includes('$20.000'), 'mis eventos muestra recaudado');
 await p3.close();
+
+// --- Invitaciones por WhatsApp + registro independiente ---
+// Laura (organizadora) invita a Sofía Zabala (de su núcleo, sin cuenta) y a Pedro (con cuenta)
+await m.goto(BASE + `/admin/eventos/${orgId}/invitaciones`);
+await m.check('input[name=user_ids]');   // Pedro (único con cuenta distinto de Laura y admin?) -> puede haber varios: marca todos
+const uChecks = await m.$$('input[name=user_ids]'); for (const c of uChecks) await c.check();
+const sofia = await m.$('label:has-text("Sofía Zabala") input[name=member_ids]'); ok(!!sofia, 'Sofía aparece como persona de núcleo sin cuenta');
+await m.evaluate(() => document.querySelectorAll('details').forEach(d => d.open = true));
+await sofia.check(); await m.fill('input[name="member_phone_' + (await sofia.getAttribute('value')) + '"]', '3009998877');
+await m.click('form[action$="/invitaciones"] button.btn');
+let ib = await m.textContent('body');
+ok(ib.includes('Sofía Zabala') && ib.includes('Sin enviar'), 'invitaciones creadas');
+const waHref = await m.getAttribute('a.wa', 'href');
+ok(waHref.startsWith('https://wa.me/573') && decodeURIComponent(waHref).includes('/i/'), 'enlace de WhatsApp con mensaje y enlace personal');
+await m.screenshot({ path: `${shots}/19-invitaciones.png`, fullPage: true });
+// token de Sofía
+const sofiaLink = await m.$eval('tr:has-text("Sofía Zabala") button.copy', b => b.dataset.copy);
+// Sofía abre el enlace sin sesión, crea su cuenta sin código familiar y entra al evento privado
+const ps = await browser.newPage(); await ps.goto(sofiaLink);
+ok((await ps.textContent('body')).includes('Campeonato de tejo') && (await ps.textContent('body')).includes('Crear mi cuenta'), 'landing de invitación');
+await ps.click('a[href^="/registro?inv="]');
+ok((await ps.$$('#code')).length === 0 && (await ps.inputValue('#name')) === 'Sofía Zabala', 'registro sin código familiar y con nombre precargado');
+await ps.fill('#email', 'sofia@test.com'); await ps.fill('#password', 'sofia123'); await ps.fill('#password2', 'sofia123'); await ps.click('button.btn');
+ok(new RegExp(`/eventos/${orgId}$`).test(ps.url()) && (await ps.textContent('body')).includes('Campeonato de tejo'), 'Sofía entra directo al evento privado');
+await ps.click('label:has(input[value=yes]) span'); await ps.click('#rsvpSubmit');
+ok((await ps.textContent('body')).includes('Sofía Zabala'), 'Sofía confirmó por su cuenta');
+// Laura la marca también como acompañante -> no se cuenta doble
+await m.goto(BASE + `/eventos/${orgId}`); await m.click('label:has(input[value=yes]) span');
+const sofChk = await m.$('label:has-text("Sofía Zabala") input[name=member_ids]'); await sofChk.check(); await m.click('#rsvpSubmit');
+await m.goto(BASE + `/admin/eventos/${orgId}`);
+ok((await m.textContent('body')).includes('ya confirmaron por su cuenta') && (await m.textContent('body')).includes('Sofía Zabala'), 'admin: Sofía no se cuenta como acompañante');
+await m.goto(BASE + `/admin/eventos/${orgId}/invitaciones`);
+ok((await m.textContent('tr:has-text("Sofía Zabala")')).includes('Aceptó'), 'invitación de Sofía marcada como aceptada');
+await ps.close();
 
 // --- Galería ---
 await m.goto(BASE + '/galeria/subir?evento=1');

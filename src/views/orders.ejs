@@ -9,9 +9,9 @@
     <td><a href="/pedidos/<%= o.id %>">#<%= o.id %></a></td>
     <td><%= o.event_title %></td>
     <td class="small"><%= o.items.map(i => `${i.qty}× ${i.name}${i.size ? ' ('+i.size+')' : ''}`).join(', ') %></td>
-    <td><b><%= h.fmtCOP(o.total) %></b></td>
+    <td><b><%= h.fmtCOP(o.total) %></b><% if (o.paid > 0 && o.paid < o.total) { %><br><span class="small muted">abonado <%= h.fmtCOP(o.paid) %> · saldo <%= h.fmtCOP(o.total - o.paid) %></span><% } %></td>
     <td><span class="badge <%= h.ORDER_STATUS[o.status].cls %>"><%= h.ORDER_STATUS[o.status].label %></span>
-      <% if (o.status === 'pending') { %><br><a class="small" href="/pedidos/<%= o.id %>">Pagar ahora →</a> · <a class="small" href="/pedidos/<%= o.id %>/editar">Editar</a><% } %></td>
+      <% if (['pending','partial'].includes(o.status)) { %><br><a class="small" href="/pedidos/<%= o.id %>"><%= o.status === 'partial' ? 'Abonar →' : 'Pagar ahora →' %></a><% if (o.status === 'pending' && !o.paid) { %> · <a class="small" href="/pedidos/<%= o.id %>/editar">Editar</a><% } %><% } %></td>
   </tr>
   <% }) %>
 </table></div>

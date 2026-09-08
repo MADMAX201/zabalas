@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const ExcelJS = require('exceljs');
 const bcrypt = require('bcryptjs');
-const { db, settings, DATA_DIR, syncEventRange, eventDates, companionsFor, uniqueCompanions, paymentFor } = require('../db');
+const { db, settings, DATA_DIR, syncEventRange, eventDates, companionsFor, uniqueCompanions, paymentFor, paidAmount, refreshOrderStatus, orderPayments } = require('../db');
 const { requireAdmin, requireManager, upload, csrfCheck } = require('../middleware');
 const h = require('../helpers');
 
@@ -20,7 +20,7 @@ r.get('/', requireAdmin, (req, res) => {
     events: db.prepare('SELECT COUNT(*) AS n FROM events WHERE COALESCE(ends_at, starts_at) >= ?').get(now).n,
     review: db.prepare("SELECT COUNT(*) AS n FROM orders WHERE status = 'review'").get().n,
     pending: db.prepare("SELECT COUNT(*) AS n FROM orders WHERE status = 'pending'").get().n,
-    paidTotal: db.prepare("SELECT COALESCE(SUM(total),0) AS n FROM orders WHERE status = 'paid'").get().n,
+    paidTotal: db.prepare("SELECT COALESCE(SUM(amount),0) AS n FROM payments WHERE status = 'confirmed'").get().n,
   };
   const events = db.prepare(`SELECT e.*,
       (SELECT COUNT(*) FROM rsvps WHERE event_id = e.id AND status='yes') AS going,
@@ -81,24 +81,25 @@ r.get('/eventos/:id', loadEvent, (req, res) => {
     .map(a => ({ ...a, companions: companionsFor(ev.id, a.user_id).map(c => c.name) }));
   const products = db.prepare('SELECT * FROM products WHERE event_id = ? ORDER BY id').all(ev.id).map(p => ({
     ...p,
-    sold: db.prepare(`SELECT COALESCE(SUM(oi.qty),0) AS n FROM order_items oi JOIN orders o ON o.id=oi.order_id WHERE oi.product_id=? AND o.status IN ('pending','review','paid')`).get(p.id).n,
+    sold: db.prepare(`SELECT COALESCE(SUM(oi.qty),0) AS n FROM order_items oi JOIN orders o ON o.id=oi.order_id WHERE oi.product_id=? AND o.status IN ('pending','partial','review','paid')`).get(p.id).n,
     paidQty: db.prepare(`SELECT COALESCE(SUM(oi.qty),0) AS n FROM order_items oi JOIN orders o ON o.id=oi.order_id WHERE oi.product_id=? AND o.status='paid'`).get(p.id).n,
   }));
   const orders = db.prepare(`SELECT o.*, u.name AS user_name, u.phone FROM orders o JOIN users u ON u.id=o.user_id WHERE o.event_id = ? ORDER BY
-    CASE o.status WHEN 'review' THEN 0 WHEN 'pending' THEN 1 WHEN 'paid' THEN 2 ELSE 3 END, o.id DESC`).all(ev.id)
-    .map(o => ({ ...o, items: db.prepare('SELECT oi.*, p.name FROM order_items oi JOIN products p ON p.id=oi.product_id WHERE order_id=?').all(o.id) }));
+    CASE o.status WHEN 'review' THEN 0 WHEN 'pending' THEN 1 WHEN 'partial' THEN 2 WHEN 'paid' THEN 3 ELSE 4 END, o.id DESC`).all(ev.id)
+    .map(o => ({ ...o, paid: paidAmount(o.id), payments: orderPayments(o.id), items: db.prepare('SELECT oi.*, p.name FROM order_items oi JOIN products p ON p.id=oi.product_id WHERE order_id=?').all(o.id) }));
   const totals = {
     yes: attendees.filter(a => a.status === 'yes').length,
     guests: uniqueCompanions(ev.id).unique + attendees.filter(a => a.status === 'yes').reduce((s, a) => s + Math.max(0, a.guests - a.companions.length), 0),
     dups: uniqueCompanions(ev.id).dups,
+    self: uniqueCompanions(ev.id).self,
     maybe: attendees.filter(a => a.status === 'maybe').length,
     no: attendees.filter(a => a.status === 'no').length,
-    paid: orders.filter(o => o.status === 'paid').reduce((s, o) => s + o.total, 0),
-    outstanding: orders.filter(o => ['pending', 'review'].includes(o.status)).reduce((s, o) => s + o.total, 0),
+    paid: orders.filter(o => o.status !== 'cancelled').reduce((s, o) => s + o.paid, 0),
+    outstanding: orders.filter(o => !['cancelled', 'paid'].includes(o.status)).reduce((s, o) => s + (o.total - o.paid), 0),
   };
   // Resumen por producto/talla (solo pagados + en verificación)
   const sizeSummary = db.prepare(`SELECT p.name, oi.size, o.status, SUM(oi.qty) AS qty FROM order_items oi JOIN orders o ON o.id=oi.order_id JOIN products p ON p.id=oi.product_id
-    WHERE o.event_id = ? AND o.status IN ('paid','review','pending') GROUP BY p.name, oi.size, o.status ORDER BY p.name, oi.size`).all(ev.id);
+    WHERE o.event_id = ? AND o.status IN ('paid','partial','review','pending') GROUP BY p.name, oi.size, o.status ORDER BY p.name, oi.size`).all(ev.id);
   const dates = eventDates(ev.id).map(d => ({ ...d, going: db.prepare('SELECT COUNT(*) AS n FROM date_rsvps WHERE date_id = ?').get(d.id).n }));
   const dateRsvps = {};
   for (const x of db.prepare('SELECT dr.user_id, dr.date_id FROM date_rsvps dr JOIN event_dates d ON d.id = dr.date_id WHERE d.event_id = ?').all(ev.id)) (dateRsvps[x.user_id] = dateRsvps[x.user_id] || new Set()).add(x.date_id);
@@ -243,21 +244,45 @@ r.post('/productos/:pid/eliminar', loadProduct, (req, res) => {
 
 // ---------- Pagos / pedidos ----------
 r.get('/pedidos', requireAdmin, (req, res) => {
-  const status = ['pending', 'review', 'paid', 'rejected', 'cancelled'].includes(req.query.estado) ? req.query.estado : null;
+  const status = ['pending', 'partial', 'review', 'paid', 'rejected', 'cancelled'].includes(req.query.estado) ? req.query.estado : null;
   const orders = db.prepare(`SELECT o.*, u.name AS user_name, u.phone, e.title AS event_title FROM orders o JOIN users u ON u.id=o.user_id JOIN events e ON e.id=o.event_id
     ${status ? 'WHERE o.status = ?' : ''} ORDER BY CASE o.status WHEN 'review' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END, o.id DESC LIMIT 300`).all(...(status ? [status] : []))
-    .map(o => ({ ...o, items: db.prepare('SELECT oi.*, p.name FROM order_items oi JOIN products p ON p.id=oi.product_id WHERE order_id=?').all(o.id) }));
+    .map(o => ({ ...o, paid: paidAmount(o.id), payments: orderPayments(o.id), items: db.prepare('SELECT oi.*, p.name FROM order_items oi JOIN products p ON p.id=oi.product_id WHERE order_id=?').all(o.id) }));
   res.render('admin/orders', { title: 'Pagos y pedidos', orders, status });
 });
 
-r.post('/pedidos/:id/estado', (req, res) => {
+// Confirmar / rechazar un abono
+r.post('/abonos/:pid/estado', (req, res) => {
+  const p = db.prepare('SELECT * FROM payments WHERE id = ?').get(req.params.pid);
+  if (!p) return res.status(404).render('error', { title: 'No encontrado', message: 'Abono no encontrado.' });
+  const o = db.prepare('SELECT * FROM orders WHERE id = ?').get(p.order_id);
+  if (req.isOrganizer) { const ev = db.prepare('SELECT organizer_id FROM events WHERE id = ?').get(o.event_id); if (!ev || ev.organizer_id !== req.user.id) return res.status(403).render('error', { title: 'Sin permiso', message: 'No puedes gestionar pedidos de otros eventos.' }); }
+  const status = ['confirmed', 'rejected', 'review'].includes(req.body.status) ? req.body.status : null;
+  if (!status) return res.redirect(req.body.back || '/admin/pedidos');
+  let amount = parseInt(String(req.body.amount || '').replace(/[^\d]/g, ''), 10) || p.amount;
+  if (amount <= 0) amount = p.amount;
+  db.prepare("UPDATE payments SET status = ?, amount = ?, note = ?, confirmed_at = CASE WHEN ? = 'confirmed' THEN datetime('now','localtime') ELSE NULL END WHERE id = ?")
+    .run(status, amount, String(req.body.note || '').trim().slice(0, 300) || null, status, p.id);
+  const upd = refreshOrderStatus(o.id);
+  req.flash('ok', `Abono #${p.id} ${h.PAY_STATUS[status].label.toLowerCase()}. Pedido #${o.id}: ${h.ORDER_STATUS[upd.status].label} (${h.fmtCOP(paidAmount(o.id))} de ${h.fmtCOP(o.total)}).`);
+  res.redirect(req.body.back || '/admin/pedidos');
+});
+// Registrar un abono manual (recibido por fuera) o marcar pagado
+r.post('/pedidos/:id/abono', (req, res) => {
   const o = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
   if (!o) return res.status(404).render('error', { title: 'No encontrado', message: 'Pedido no encontrado.' });
-  const status = ['paid', 'rejected', 'pending', 'cancelled'].includes(req.body.status) ? req.body.status : null;
-  if (!status) return res.redirect(req.body.back || '/admin/pedidos');
-  db.prepare("UPDATE orders SET status = ?, admin_note = ?, paid_at = CASE WHEN ? = 'paid' THEN datetime('now','localtime') ELSE NULL END WHERE id = ?")
-    .run(status, String(req.body.admin_note || '').trim().slice(0, 300) || null, status, o.id);
-  req.flash('ok', `Pedido #${o.id}: ${h.ORDER_STATUS[status].label}.`);
+  if (req.isOrganizer) { const ev = db.prepare('SELECT organizer_id FROM events WHERE id = ?').get(o.event_id); if (!ev || ev.organizer_id !== req.user.id) return res.status(403).render('error', { title: 'Sin permiso', message: 'No puedes gestionar pedidos de otros eventos.' }); }
+  if (req.body.action === 'cancel') { db.prepare("UPDATE orders SET status = 'cancelled' WHERE id = ?").run(o.id); req.flash('ok', `Pedido #${o.id} cancelado.`); return res.redirect(req.body.back || '/admin/pedidos'); }
+  if (req.body.action === 'reopen') { db.prepare("UPDATE orders SET status = 'pending' WHERE id = ?").run(o.id); refreshOrderStatus(o.id); req.flash('ok', `Pedido #${o.id} reabierto.`); return res.redirect(req.body.back || '/admin/pedidos'); }
+  const remaining = o.total - paidAmount(o.id);
+  let amount = req.body.action === 'full' ? remaining : (parseInt(String(req.body.amount || '').replace(/[^\d]/g, ''), 10) || 0);
+  if (amount <= 0 || remaining <= 0) { req.flash('bad', 'Indica un valor válido.'); return res.redirect(req.body.back || '/admin/pedidos'); }
+  if (amount > remaining) amount = remaining;
+  const method = ['cash', 'transfer', 'other'].includes(req.body.method) ? req.body.method : 'cash';
+  db.prepare("INSERT INTO payments (order_id, amount, status, method, note, confirmed_at) VALUES (?, ?, 'confirmed', ?, ?, datetime('now','localtime'))")
+    .run(o.id, amount, method, (String(req.body.note || '').trim().slice(0, 260) || 'Abono registrado por ' + req.user.name.split(' ')[0]));
+  const upd = refreshOrderStatus(o.id);
+  req.flash('ok', `Abono de ${h.fmtCOP(amount)} registrado. Pedido #${o.id}: ${h.ORDER_STATUS[upd.status].label}.`);
   res.redirect(req.body.back || '/admin/pedidos');
 });
 
@@ -265,9 +290,10 @@ r.post('/pedidos/:id/estado', (req, res) => {
 r.post('/pedidos/:id/eliminar', (req, res) => {
   const o = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
   if (!o) return res.status(404).render('error', { title: 'No encontrado', message: 'Pedido no encontrado.' });
-  if (!['pending', 'rejected', 'cancelled'].includes(o.status)) { req.flash('bad', 'Solo se pueden eliminar pedidos sin pago (pendientes, rechazados o cancelados).'); return res.redirect(req.body.back || '/admin/pedidos'); }
+  if (!['pending', 'cancelled'].includes(o.status) || paidAmount(o.id) > 0) { req.flash('bad', 'Solo se pueden eliminar pedidos sin abonos confirmados (pendientes o cancelados).'); return res.redirect(req.body.back || '/admin/pedidos'); }
+  if (req.isOrganizer) { const ev = db.prepare('SELECT organizer_id FROM events WHERE id = ?').get(o.event_id); if (!ev || ev.organizer_id !== req.user.id) return res.status(403).render('error', { title: 'Sin permiso', message: 'No puedes gestionar pedidos de otros eventos.' }); }
+  orderPayments(o.id).forEach(p => removeFile(p.receipt));
   db.prepare('DELETE FROM orders WHERE id = ?').run(o.id);
-  removeFile(o.receipt);
   req.flash('ok', `Pedido #${o.id} eliminado.`);
   res.redirect(req.body.back || '/admin/pedidos');
 });
@@ -335,20 +361,30 @@ r.get('/eventos/:id/exportar.xlsx', loadEvent, async (req, res) => {
   ws2.columns = [
     { header: 'Pedido', key: 'id' }, { header: 'Integrante', key: 'user_name' }, { header: 'Teléfono', key: 'phone' }, { header: 'Producto', key: 'product' },
     { header: 'Para', key: 'for_name' }, { header: 'Talla', key: 'size' }, { header: 'Cant.', key: 'qty' }, { header: 'Precio', key: 'unit_price' },
-    { header: 'Subtotal', key: 'subtotal' }, { header: 'Estado', key: 'status' }, { header: 'Ref. Nequi', key: 'receipt_ref' }, { header: 'Fecha pedido', key: 'created_at' }, { header: 'Fecha pago', key: 'paid_at' },
+    { header: 'Subtotal', key: 'subtotal' }, { header: 'Estado', key: 'status' }, { header: 'Total pedido', key: 'total' }, { header: 'Abonado', key: 'paid' }, { header: 'Saldo', key: 'balance' }, { header: 'Fecha pedido', key: 'created_at' }, { header: 'Fecha pago', key: 'paid_at' },
   ];
-  const rows = db.prepare(`SELECT o.id, u.name AS user_name, u.phone, p.name AS product, oi.for_name, oi.size, oi.qty, oi.unit_price, o.status, o.receipt_ref, o.created_at, o.paid_at
+  const rows = db.prepare(`SELECT o.id, u.name AS user_name, u.phone, p.name AS product, oi.for_name, oi.size, oi.qty, oi.unit_price, o.status, o.total, o.created_at, o.paid_at
     FROM orders o JOIN users u ON u.id=o.user_id JOIN order_items oi ON oi.order_id=o.id JOIN products p ON p.id=oi.product_id WHERE o.event_id=? ORDER BY o.id`).all(ev.id);
-  for (const x of rows) ws2.addRow({ ...x, subtotal: x.qty * x.unit_price, status: h.ORDER_STATUS[x.status].label });
-  ['unit_price', 'subtotal'].forEach(k => ws2.getColumn(k).numFmt = '"$"#,##0');
+  for (const x of rows) { const paid = paidAmount(x.id); ws2.addRow({ ...x, subtotal: x.qty * x.unit_price, status: h.ORDER_STATUS[x.status].label, paid, balance: Math.max(0, x.total - paid) }); }
+  ['unit_price', 'subtotal', 'total', 'paid', 'balance'].forEach(k => ws2.getColumn(k).numFmt = '"$"#,##0');
+  // Hoja de saldos por persona
+  const ws4 = wb.addWorksheet('Saldos');
+  ws4.columns = [{ header: 'Integrante', key: 'name' }, { header: 'Teléfono', key: 'phone' }, { header: 'Pedidos', key: 'n' }, { header: 'Total', key: 'total' }, { header: 'Abonado', key: 'paid' }, { header: 'Saldo', key: 'balance' }];
+  const per = {};
+  for (const o of db.prepare("SELECT o.id, o.total, u.name, u.phone FROM orders o JOIN users u ON u.id=o.user_id WHERE o.event_id=? AND o.status != 'cancelled'").all(ev.id)) {
+    per[o.name] = per[o.name] || { name: o.name, phone: o.phone, n: 0, total: 0, paid: 0 }; per[o.name].n++; per[o.name].total += o.total; per[o.name].paid += paidAmount(o.id);
+  }
+  Object.values(per).forEach(p => ws4.addRow({ ...p, balance: Math.max(0, p.total - p.paid) }));
+  ['total', 'paid', 'balance'].forEach(k => ws4.getColumn(k).numFmt = '"$"#,##0');
+  header(ws4);
   header(ws2);
 
   const ws3 = wb.addWorksheet('Resumen tallas');
   ws3.columns = [{ header: 'Producto', key: 'name' }, { header: 'Talla', key: 'size' }, { header: 'Pagadas', key: 'paid' }, { header: 'En verificación', key: 'review' }, { header: 'Pendientes', key: 'pending' }];
   const sum = {};
   for (const x of db.prepare(`SELECT p.name, oi.size, o.status, SUM(oi.qty) AS qty FROM order_items oi JOIN orders o ON o.id=oi.order_id JOIN products p ON p.id=oi.product_id
-      WHERE o.event_id=? AND o.status IN ('paid','review','pending') GROUP BY p.name, oi.size, o.status`).all(ev.id)) {
-    const k = `${x.name}|${x.size || ''}`; sum[k] = sum[k] || { name: x.name, size: x.size || '-', paid: 0, review: 0, pending: 0 }; sum[k][x.status] += x.qty;
+      WHERE o.event_id=? AND o.status IN ('paid','partial','review','pending') GROUP BY p.name, oi.size, o.status`).all(ev.id)) {
+    const k = `${x.name}|${x.size || ''}`; sum[k] = sum[k] || { name: x.name, size: x.size || '-', paid: 0, review: 0, pending: 0 }; sum[k][x.status === 'partial' ? 'pending' : x.status] += x.qty;
   }
   Object.values(sum).forEach(r => ws3.addRow(r));
   header(ws3);

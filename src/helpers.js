@@ -85,15 +85,22 @@ function googleCalUrl(ev, url, d) {
 
 const ORDER_STATUS = {
   pending: { label: 'Pendiente de pago', cls: 'warn' },
-  review: { label: 'En verificación', cls: 'info' },
+  partial: { label: 'Abonado parcialmente', cls: 'info' },
+  review: { label: 'Abono en verificación', cls: 'info' },
   paid: { label: 'Pagado', cls: 'ok' },
   rejected: { label: 'Rechazado', cls: 'bad' },
   cancelled: { label: 'Cancelado', cls: 'muted' },
 };
+const PAY_STATUS = {
+  review: { label: 'En verificación', cls: 'info' },
+  confirmed: { label: 'Confirmado', cls: 'ok' },
+  rejected: { label: 'Rechazado', cls: 'bad' },
+};
+const PAY_METHOD = { transfer: 'Transferencia', cash: 'Efectivo', other: 'Otro' };
 const RSVP = {
   yes: { label: 'Asistiré', cls: 'ok' },
   maybe: { label: 'Tal vez', cls: 'warn' },
   no: { label: 'No asistiré', cls: 'muted' },
 };
 
-module.exports = { fmtDate, fmtTime, fmtDateTime, fmtShort, fmtDayShort, fmtCOP, isPast, nowLocalISO, buildICS, googleCalUrl, ORDER_STATUS, RSVP, parseLocal };
+module.exports = { fmtDate, fmtTime, fmtDateTime, fmtShort, fmtDayShort, fmtCOP, isPast, nowLocalISO, buildICS, googleCalUrl, ORDER_STATUS, PAY_STATUS, PAY_METHOD, RSVP, parseLocal };

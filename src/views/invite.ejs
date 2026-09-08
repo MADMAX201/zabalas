@@ -1,0 +1,14 @@
+<%- include('partials/head') %>
+<div class="auth" style="max-width:520px"><div class="card">
+  <img class="auth-logo" src="/img/logo.jpeg" alt="<%= site.site_name %>">
+  <p class="center muted small">Hola, <b><%= inv.name.split(' ')[0] %></b>. Te invitaron a:</p>
+  <% if (inv.image) { %><img src="/uploads/<%= inv.image %>" style="width:100%;border-radius:12px;max-height:220px;object-fit:cover" alt=""><% } %>
+  <h1 class="center" style="margin-top:10px"><%= inv.title %></h1>
+  <p class="center">📅 <%= h.fmtDateTime(inv.starts_at) %><% if (inv.location) { %><br>📍 <%= inv.location %><% } %></p>
+  <% if (inv.description) { %><p class="small muted" style="white-space:pre-line"><%= inv.description.slice(0, 400) %></p><% } %>
+  <p class="center small">Para confirmar tu asistencia necesitas una cuenta en el sitio de la familia.</p>
+  <a class="btn block mt" href="/registro?inv=<%= inv.token %>">Crear mi cuenta y confirmar</a>
+  <a class="btn block sec mt" href="/login">Ya tengo cuenta · Ingresar</a>
+  <p class="help center mt">Con esta invitación no necesitas el código familiar<%= inv.access_code ? ' ni el código del evento' : '' %>.</p>
+</div></div>
+<%- include('partials/foot') %>

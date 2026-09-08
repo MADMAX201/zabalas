@@ -144,3 +144,12 @@ details.card summary{cursor:pointer;font-weight:600}
 .date-opt .date-txt{display:flex;flex-direction:column;line-height:1.25}
 .date-opt.past{opacity:.6}
 .date-opt:has(input:checked){background:var(--brand-soft)}
+
+/* Avance de pago */
+.prog{height:10px;background:#e8e4dc;border-radius:999px;overflow:hidden;margin:4px 0 2px}
+.prog-bar{height:100%;background:var(--accent);border-radius:999px;transition:width .3s}
+.prog-bar.done{background:var(--ok)}
+.pay-list{margin:8px 0;padding:0;list-style:none}
+.pay-list li{display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px dashed var(--line);font-size:.9rem}
+
+.btn.wa{background:#25d366;border-color:#25d366;color:#fff}

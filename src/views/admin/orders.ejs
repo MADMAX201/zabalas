@@ -2,21 +2,20 @@
 <h1>Pagos y pedidos</h1>
 <%- include('_nav') %>
 <div class="row mb">
-  <% const f = [['', 'Todos'], ['review', 'Por verificar'], ['pending', 'Sin pagar'], ['paid', 'Pagados'], ['rejected', 'Rechazados'], ['cancelled', 'Cancelados']]; %>
+  <% const f = [['', 'Todos'], ['review', 'Por verificar'], ['pending', 'Sin pagar'], ['partial', 'Con saldo'], ['paid', 'Pagados'], ['cancelled', 'Cancelados']]; %>
   <% f.forEach(([k, l]) => { %><a class="btn sm <%= (status || '') === k ? '' : 'ghost' %>" href="/admin/pedidos<%= k ? '?estado='+k : '' %>"><%= l %></a><% }) %>
 </div>
 <% if (!orders.length) { %><div class="card center muted">No hay pedidos en esta categoría.</div><% } else { %>
 <div class="card pad0 scroll"><table class="tbl">
-  <tr><th>#</th><th>Integrante</th><th>Evento</th><th>Productos</th><th>Total</th><th>Estado</th><th>Comprobante</th><th>Acciones</th></tr>
+  <tr><th>#</th><th>Integrante</th><th>Evento</th><th>Productos</th><th>Total</th><th>Estado</th><th style="min-width:340px">Abonos y acciones</th></tr>
   <% orders.forEach(o => { %>
   <tr>
     <td><a href="/pedidos/<%= o.id %>">#<%= o.id %></a><br><span class="small muted"><%= o.created_at.slice(0,10) %></span></td>
     <td><%= o.user_name %><% if (o.phone) { %><br><span class="small muted"><%= o.phone %></span><% } %></td>
     <td class="small"><%= o.event_title %></td>
     <td class="small"><%= o.items.map(i => `${i.qty}× ${i.name}${i.size ? ' ('+i.size+')' : ''}`).join('; ') %></td>
-    <td><b><%= h.fmtCOP(o.total) %></b></td>
+    <td><b><%= h.fmtCOP(o.total) %></b><% if (o.paid > 0 && o.paid < o.total) { %><br><span class="small muted">abonado <%= h.fmtCOP(o.paid) %></span><% } %></td>
     <td><span class="badge <%= h.ORDER_STATUS[o.status].cls %>"><%= h.ORDER_STATUS[o.status].label %></span><% if (o.admin_note) { %><br><span class="small muted"><%= o.admin_note %></span><% } %></td>
-    <td><% if (o.receipt) { %><a href="/uploads/<%= o.receipt %>" target="_blank">Ver</a><% if (o.receipt_ref) { %><br><span class="small muted"><%= o.receipt_ref %></span><% } %><% } else { %>—<% } %></td>
     <td><%- include('_order_actions', { o, back: '/admin/pedidos' + (status ? '?estado='+status : '') }) %></td>
   </tr>
   <% }) %>

@@ -1,7 +1,7 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const { db, DATA_DIR, household, paymentFor } = require('../db');
+const { db, DATA_DIR, household, paymentFor, paidAmount, refreshOrderStatus, orderPayments } = require('../db');
 const { requireLogin, upload, csrfCheck } = require('../middleware');
 const h = require('../helpers');
 const { soldQty } = require('./events');
@@ -61,13 +61,15 @@ function loadOrder(req, res, next) {
   const o = db.prepare('SELECT o.*, e.title AS event_title, e.organizer_id FROM orders o JOIN events e ON e.id = o.event_id WHERE o.id = ?').get(req.params.id);
   if (!o || (o.user_id !== req.user.id && req.user.role !== 'admin' && o.organizer_id !== req.user.id)) return res.status(404).render('error', { title: 'No encontrado', message: 'Pedido no encontrado.' });
   o.pay = paymentFor(db.prepare('SELECT * FROM events WHERE id = ?').get(o.event_id));
+  o.payments = orderPayments(o.id); o.paid = paidAmount(o.id); o.balance = Math.max(0, o.total - o.paid);
+  o.inReview = o.payments.filter(p => p.status === 'review').reduce((s, p) => s + p.amount, 0);
   o.items = db.prepare('SELECT oi.*, p.name FROM order_items oi JOIN products p ON p.id = oi.product_id WHERE order_id = ?').all(o.id);
   req.order = o; next();
 }
 
 r.get('/pedidos', requireLogin, (req, res) => {
   const orders = db.prepare('SELECT o.*, e.title AS event_title FROM orders o JOIN events e ON e.id = o.event_id WHERE o.user_id = ? ORDER BY o.id DESC').all(req.user.id)
-    .map(o => ({ ...o, items: db.prepare('SELECT oi.*, p.name FROM order_items oi JOIN products p ON p.id = oi.product_id WHERE order_id = ?').all(o.id) }));
+    .map(o => ({ ...o, paid: paidAmount(o.id), items: db.prepare('SELECT oi.*, p.name FROM order_items oi JOIN products p ON p.id = oi.product_id WHERE order_id = ?').all(o.id) }));
   res.render('orders', { title: 'Mis pedidos', orders });
 });
 
@@ -80,7 +82,7 @@ function loadProducts(eventId) {
 }
 r.get('/pedidos/:id/editar', requireLogin, loadOrder, (req, res) => {
   const o = req.order;
-  if (o.status !== 'pending') { req.flash('bad', 'Solo se pueden editar pedidos pendientes de pago.'); return res.redirect(`/pedidos/${o.id}`); }
+  if (o.status !== 'pending' || o.payments.length) { req.flash('bad', 'Solo se pueden editar pedidos sin abonos.'); return res.redirect(`/pedidos/${o.id}`); }
   // Al editar, el stock disponible debe incluir lo que este pedido ya tiene reservado
   const products = loadProducts(o.event_id).map(p => {
     const own = o.items.filter(i => i.product_id === p.id).reduce((s, i) => s + i.qty, 0);
@@ -90,7 +92,7 @@ r.get('/pedidos/:id/editar', requireLogin, loadOrder, (req, res) => {
 });
 r.post('/pedidos/:id/editar', requireLogin, loadOrder, (req, res) => {
   const o = req.order;
-  if (o.status !== 'pending') { req.flash('bad', 'Solo se pueden editar pedidos pendientes de pago.'); return res.redirect(`/pedidos/${o.id}`); }
+  if (o.status !== 'pending' || o.payments.length) { req.flash('bad', 'Solo se pueden editar pedidos sin abonos.'); return res.redirect(`/pedidos/${o.id}`); }
   const ev = db.prepare('SELECT * FROM events WHERE id = ?').get(o.event_id);
   let items;
   try { items = parseItems(req.body, ev, o.id); } catch (e) { req.flash('bad', e.message); return res.redirect(`/pedidos/${o.id}/editar`); }
@@ -105,21 +107,27 @@ r.post('/pedidos/:id/editar', requireLogin, loadOrder, (req, res) => {
   res.redirect(`/pedidos/${o.id}`);
 });
 
-// Subir comprobante
+// Subir un abono (comprobante + monto). Puede ser el total o una parte.
 r.post('/pedidos/:id/comprobante', requireLogin, loadOrder, upload.single('receipt'), csrfCheck, (req, res) => {
   const o = req.order;
-  if (!['pending', 'rejected'].includes(o.status)) { req.flash('bad', 'Este pedido ya no acepta comprobantes.'); return res.redirect(`/pedidos/${o.id}`); }
+  if (['paid', 'cancelled'].includes(o.status)) { req.flash('bad', 'Este pedido ya no acepta abonos.'); return res.redirect(`/pedidos/${o.id}`); }
   if (!req.file) { req.flash('bad', 'Adjunta la captura del comprobante.'); return res.redirect(`/pedidos/${o.id}`); }
-  if (o.receipt) { try { fs.unlinkSync(path.join(DATA_DIR, 'uploads', o.receipt)); } catch {} }
-  db.prepare("UPDATE orders SET receipt = ?, receipt_ref = ?, status = 'review', admin_note = NULL WHERE id = ?")
-    .run(req.file.filename, String(req.body.receipt_ref || '').trim().slice(0, 60) || null, o.id);
-  req.flash('ok', 'Comprobante recibido. Un administrador confirmará tu pago pronto.');
+  let amount = parseInt(String(req.body.amount || '').replace(/[^\d]/g, ''), 10) || 0;
+  const maxAmt = o.total - o.paid - o.inReview;
+  if (amount <= 0) { fs.unlink(req.file.path, () => {}); req.flash('bad', 'Indica el valor del abono.'); return res.redirect(`/pedidos/${o.id}`); }
+  if (amount > maxAmt) amount = maxAmt;
+  if (amount <= 0) { fs.unlink(req.file.path, () => {}); req.flash('bad', 'Ya tienes abonos en verificación por el total del pedido.'); return res.redirect(`/pedidos/${o.id}`); }
+  db.prepare("INSERT INTO payments (order_id, amount, receipt, receipt_ref, status) VALUES (?, ?, ?, ?, 'review')")
+    .run(o.id, amount, req.file.filename, String(req.body.receipt_ref || '').trim().slice(0, 60) || null);
+  db.prepare('UPDATE orders SET receipt = ?, receipt_ref = ? WHERE id = ?').run(req.file.filename, String(req.body.receipt_ref || '').trim().slice(0, 60) || null, o.id);
+  refreshOrderStatus(o.id);
+  req.flash('ok', `Abono de ${h.fmtCOP(amount)} recibido. Un administrador lo confirmará pronto.`);
   res.redirect(`/pedidos/${o.id}`);
 });
 
 r.post('/pedidos/:id/cancelar', requireLogin, loadOrder, (req, res) => {
   const o = req.order;
-  if (o.status !== 'pending') { req.flash('bad', 'Solo puedes cancelar pedidos pendientes de pago.'); return res.redirect(`/pedidos/${o.id}`); }
+  if (o.status !== 'pending' || o.payments.some(p => p.status !== 'rejected')) { req.flash('bad', 'Solo puedes cancelar pedidos sin abonos.'); return res.redirect(`/pedidos/${o.id}`); }
   db.prepare("UPDATE orders SET status = 'cancelled' WHERE id = ?").run(o.id);
   req.flash('ok', 'Pedido cancelado.');
   res.redirect('/pedidos');

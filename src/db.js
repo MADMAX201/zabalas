@@ -179,6 +179,40 @@ const settings = {
   set(key, value) { db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, value); },
 };
 
+// Abonos parciales por pedido
+db.exec(`
+CREATE TABLE IF NOT EXISTS payments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  amount INTEGER NOT NULL,
+  receipt TEXT,
+  receipt_ref TEXT,
+  status TEXT NOT NULL DEFAULT 'review',      -- review | confirmed | rejected
+  note TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  confirmed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_payments_order ON payments(order_id);
+`);
+if (!cols('payments').includes('method')) db.exec("ALTER TABLE payments ADD COLUMN method TEXT NOT NULL DEFAULT 'transfer'"); // transfer | cash | other
+// Migración: pedidos con comprobante único -> un abono por el total
+for (const o of db.prepare("SELECT * FROM orders WHERE receipt IS NOT NULL AND id NOT IN (SELECT DISTINCT order_id FROM payments)").all()) {
+  const st = o.status === 'paid' ? 'confirmed' : o.status === 'rejected' ? 'rejected' : 'review';
+  db.prepare('INSERT INTO payments (order_id, amount, receipt, receipt_ref, status, note, created_at, confirmed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(o.id, o.total, o.receipt, o.receipt_ref, st, o.admin_note, o.created_at, o.paid_at);
+}
+// Estado del pedido derivado de sus abonos
+function paidAmount(orderId) { return db.prepare("SELECT COALESCE(SUM(amount),0) AS n FROM payments WHERE order_id = ? AND status = 'confirmed'").get(orderId).n; }
+function refreshOrderStatus(orderId) {
+  const o = db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId); if (!o || o.status === 'cancelled') return o;
+  const paid = paidAmount(orderId);
+  const inReview = db.prepare("SELECT COUNT(*) AS n FROM payments WHERE order_id = ? AND status = 'review'").get(orderId).n > 0;
+  const status = paid >= o.total ? 'paid' : inReview ? 'review' : paid > 0 ? 'partial' : 'pending';
+  db.prepare("UPDATE orders SET status = ?, paid_at = CASE WHEN ? = 'paid' THEN COALESCE(paid_at, datetime('now','localtime')) ELSE NULL END WHERE id = ?").run(status, status, orderId);
+  return db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
+}
+function orderPayments(orderId) { return db.prepare('SELECT * FROM payments WHERE order_id = ? ORDER BY id').all(orderId); }
+
 // Núcleo familiar de cada integrante y acompañantes por evento
 db.exec(`
 CREATE TABLE IF NOT EXISTS household_members (
@@ -228,9 +262,46 @@ function companionsFor(eventId, userId) {
 function uniqueCompanions(eventId) {
   const rows = db.prepare(`SELECT c.user_id, u.name AS owner, m.id, m.name, m.alias_of FROM rsvp_companions c JOIN household_members m ON m.id = c.member_id JOIN users u ON u.id = c.user_id
     WHERE c.event_id = ?`).all(eventId);
-  const seen = new Map(); const dups = [];
-  for (const r of rows) { const k = canonicalId(r); if (seen.has(k)) dups.push({ name: r.name, owners: [seen.get(k).owner, r.owner] }); else seen.set(k, r); }
-  return { unique: seen.size, dups };
+  const seen = new Map(); const dups = []; const self = [];
+  for (const r of rows) {
+    // Si la persona tiene cuenta propia y ya confirmó por su cuenta en este evento, no se cuenta como acompañante
+    const linked = db.prepare('SELECT linked_user_id FROM household_members WHERE id = ?').get(canonicalId(r));
+    if (linked && linked.linked_user_id && db.prepare("SELECT 1 FROM rsvps WHERE event_id = ? AND user_id = ? AND status = 'yes'").get(eventId, linked.linked_user_id)) { self.push({ name: r.name, owner: r.owner }); continue; }
+    const k = canonicalId(r); if (seen.has(k)) dups.push({ name: r.name, owners: [seen.get(k).owner, r.owner] }); else seen.set(k, r);
+  }
+  return { unique: seen.size, dups, self };
+}
+
+// Invitaciones por WhatsApp (enlace personal por invitado)
+db.exec(`
+CREATE TABLE IF NOT EXISTS invitations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  phone TEXT,
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,          -- invitado con cuenta
+  member_id INTEGER REFERENCES household_members(id) ON DELETE SET NULL, -- invitado que figura en un núcleo
+  token TEXT NOT NULL UNIQUE,
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  sent_at TEXT, opened_at TEXT, accepted_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_inv_event ON invitations(event_id);
+`);
+if (!cols('household_members').includes('linked_user_id')) db.exec('ALTER TABLE household_members ADD COLUMN linked_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL');
+if (!cols('events').includes('invite_message')) db.exec('ALTER TABLE events ADD COLUMN invite_message TEXT');
+// Teléfono colombiano -> formato internacional para wa.me (57 + 10 dígitos)
+function waPhone(p) {
+  let d = String(p || '').replace(/[^\d]/g, '');
+  if (!d) return '';
+  if (d.length === 10 && d.startsWith('3')) d = '57' + d;
+  if (d.startsWith('0')) d = d.replace(/^0+/, '');
+  return d;
+}
+// Vincula una cuenta nueva con la persona del mismo nombre en los núcleos de otros (para no contarla dos veces)
+function linkUserToHousehold(user) {
+  const n = normName(user.name);
+  db.prepare('UPDATE household_members SET linked_user_id = ? WHERE linked_user_id IS NULL AND norm = ? AND user_id != ?').run(user.id, n, user.id);
 }
 
 // Recalcula el rango del evento a partir de sus fechas
@@ -250,4 +321,4 @@ function paymentFor(ev) {
 }
 const canManage = (ev, user) => !!user && (user.role === 'admin' || (ev && ev.organizer_id === user.id));
 
-module.exports = { paymentFor, canManage, db, settings, DATA_DIR, syncEventRange, eventDates, household, companionsFor, findSimilar, addHouseholdMember, uniqueCompanions, normName, isFullName };
+module.exports = { waPhone, linkUserToHousehold, paymentFor, canManage, paidAmount, refreshOrderStatus, orderPayments, db, settings, DATA_DIR, syncEventRange, eventDates, household, companionsFor, findSimilar, addHouseholdMember, uniqueCompanions, normName, isFullName };

@@ -15,7 +15,7 @@
     </table>
     <p class="small muted">Creado el <%= h.fmtDateTime(o.created_at.replace(' ', 'T').slice(0,16)) %></p>
     <% if (o.admin_note) { %><div class="flash <%= o.status === 'rejected' ? 'bad' : 'info' %>">Mensaje del administrador: <%= o.admin_note %></div><% } %>
-    <% if (o.status === 'pending') { %>
+    <% if (o.status === 'pending' && !o.payments.some(p => p.status !== 'rejected')) { %>
     <div class="row" style="gap:8px">
       <a class="btn sec sm" href="/pedidos/<%= o.id %>/editar">✏️ Editar pedido</a>
       <form method="post" action="/pedidos/<%= o.id %>/cancelar" data-confirm="¿Cancelar este pedido?"><input type="hidden" name="_csrf" value="<%= csrf %>"><button class="btn ghost sm">Cancelar pedido</button></form>
@@ -24,39 +24,54 @@
   </div>
 
   <div class="card">
+    <h2>Avance del pago</h2>
+    <%- include('partials/progress', { paid: o.paid, total: o.total }) %>
+    <% if (o.payments.length) { %>
+    <ul class="pay-list">
+      <% o.payments.forEach(p => { %>
+      <li><span><%= h.fmtDayShort(p.created_at.replace(' ', 'T').slice(0,16)) %> · <b><%= h.fmtCOP(p.amount) %></b> <span class="muted">(<%= h.PAY_METHOD[p.method] %><%= p.receipt_ref ? ' · ' + p.receipt_ref : '' %>)</span>
+          <% if (p.note) { %><br><span class="small muted"><%= p.note %></span><% } %></span>
+        <span><span class="badge <%= h.PAY_STATUS[p.status].cls %>"><%= h.PAY_STATUS[p.status].label %></span><% if (p.receipt) { %> <a class="small" href="/uploads/<%= p.receipt %>" target="_blank">ver</a><% } %></span></li>
+      <% }) %>
+    </ul>
+    <% } %>
+
     <% if (o.status === 'paid') { %>
-      <h2>✅ Pago confirmado</h2>
-      <p>¡Gracias! Tu pago fue verificado<% if (o.paid_at) { %> el <%= h.fmtDateTime(o.paid_at.replace(' ', 'T').slice(0,16)) %><% } %>.</p>
-      <% if (o.receipt) { %><p><a href="/uploads/<%= o.receipt %>" target="_blank">Ver comprobante</a></p><% } %>
-    <% } else if (o.status === 'review') { %>
-      <h2>🕒 Comprobante en verificación</h2>
-      <p>Recibimos tu comprobante<% if (o.receipt_ref) { %> (ref. <%= o.receipt_ref %>)<% } %>. Un administrador lo revisará pronto.</p>
-      <% if (o.receipt) { %><a href="/uploads/<%= o.receipt %>" target="_blank"><% if (/\.pdf$/i.test(o.receipt)) { %>Ver PDF<% } else { %><img class="receipt-thumb" src="/uploads/<%= o.receipt %>" alt="Comprobante"><% } %></a><% } %>
+      <h3 class="mt">✅ Pago completo</h3>
+      <p>¡Gracias! Tu pedido está totalmente pagado<% if (o.paid_at) { %> (<%= h.fmtDateTime(o.paid_at.replace(' ', 'T').slice(0,16)) %>)<% } %>.</p>
     <% } else if (o.status === 'cancelled') { %>
-      <h2>Pedido cancelado</h2>
+      <h3 class="mt">Pedido cancelado</h3>
     <% } else { %>
-      <h2>Paga por <%= o.pay.method === 'breb' ? 'Bre-B' : 'Nequi' %></h2>
+      <% if (o.inReview) { %><div class="flash info">Tienes <%= h.fmtCOP(o.inReview) %> en verificación. Cuando se confirme, el saldo bajará.</div><% } %>
+      <% const maxAmt = o.total - o.paid - o.inReview; if (maxAmt > 0) { %>
+      <h3 class="mt">Abonar por <%= o.pay.method === 'breb' ? 'Bre-B' : 'Nequi' %></h3>
       <% if (!o.pay.number) { %>
         <div class="flash warn">El organizador aún no ha configurado dónde recibir el pago. Escríbele para coordinarlo.</div>
       <% } else { %>
       <div class="nequi">
-        <div class="small">Envía <b><%= h.fmtCOP(o.total) %></b> <%= o.pay.method === 'breb' ? 'por Bre-B a la llave' : 'al Nequi' %></div>
+        <div class="small">Envía hasta <b><%= h.fmtCOP(maxAmt) %></b> <%= o.pay.method === 'breb' ? 'por Bre-B a la llave' : 'al Nequi' %></div>
         <div class="num" style="<%= o.pay.method === 'breb' ? 'font-size:1.2rem;letter-spacing:.02em;word-break:break-all' : '' %>"><%= o.pay.number %></div>
         <% if (o.pay.holder) { %><div class="small">A nombre de <b><%= o.pay.holder %></b></div><% } %>
         <button type="button" class="copy mt" data-copy="<%= o.pay.number.replace(/\s/g,'') %>">Copiar</button>
         <% if (o.pay.qr) { %><div><img src="/uploads/<%= o.pay.qr %>" alt="QR de pago"></div><% } %>
       </div>
       <% } %>
-      <p class="small mt" style="white-space:pre-line"><%= site.payment_instructions %></p>
+      <p class="small mt" style="white-space:pre-line"><%= site.payment_instructions %> Puedes pagar todo de una vez o por abonos.</p>
       <form method="post" action="/pedidos/<%= o.id %>/comprobante" enctype="multipart/form-data">
         <input type="hidden" name="_csrf" value="<%= csrf %>">
+        <label for="amount">Valor de este abono</label>
+        <div class="row" style="gap:6px">
+          <input id="amount" type="number" name="amount" min="1000" max="<%= maxAmt %>" step="any" value="<%= maxAmt %>" required style="max-width:200px">
+          <button type="button" class="btn ghost sm" onclick="document.getElementById('amount').value=<%= maxAmt %>">Todo el saldo</button>
+        </div>
         <label for="receipt">Captura del comprobante</label>
         <input id="receipt" type="file" name="receipt" accept="image/*,.pdf" required data-preview="rprev">
         <img id="rprev" class="receipt-thumb mt" hidden alt="">
         <label for="ref">Referencia / número de transacción (opcional)</label>
         <input id="ref" type="text" name="receipt_ref" maxlength="60" placeholder="M12345678">
-        <button class="btn block mt">Enviar comprobante</button>
+        <button class="btn block mt" type="submit" id="abonoBtn">Enviar abono</button>
       </form>
+      <% } %>
     <% } %>
   </div>
 </div>

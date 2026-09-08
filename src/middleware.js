@@ -51,7 +51,9 @@ function requireManager(req, res, next) {
   if ((mt = p.match(/^\/eventos\/(\d+)(\/|$)/))) eventId = Number(mt[1]);
   else if ((mt = p.match(/^\/productos\/(\d+)\//))) eventId = (db.prepare('SELECT event_id FROM products WHERE id = ?').get(mt[1]) || {}).event_id;
   else if ((mt = p.match(/^\/fechas\/(\d+)\//))) eventId = (db.prepare('SELECT event_id FROM event_dates WHERE id = ?').get(mt[1]) || {}).event_id;
-  else if ((mt = p.match(/^\/pedidos\/(\d+)\/(estado|eliminar)$/))) eventId = (db.prepare('SELECT event_id FROM orders WHERE id = ?').get(mt[1]) || {}).event_id;
+  else if ((mt = p.match(/^\/pedidos\/(\d+)\/(estado|eliminar|abono)$/))) eventId = (db.prepare('SELECT event_id FROM orders WHERE id = ?').get(mt[1]) || {}).event_id;
+  else if ((mt = p.match(/^\/invitaciones\/(\d+)\//))) eventId = (db.prepare('SELECT event_id FROM invitations WHERE id = ?').get(mt[1]) || {}).event_id;
+  else if ((mt = p.match(/^\/abonos\/(\d+)\/estado$/))) eventId = (db.prepare('SELECT o.event_id FROM payments p JOIN orders o ON o.id = p.order_id WHERE p.id = ?').get(mt[1]) || {}).event_id;
   const ev = eventId ? db.prepare('SELECT id, organizer_id FROM events WHERE id = ?').get(eventId) : null;
   if (ev && ev.organizer_id === req.user.id) { req.isOrganizer = true; res.locals.isOrganizer = true; return next(); }
   return res.status(403).render('error', { title: 'Sin permiso', message: 'Esta sección es solo para administradores o el organizador del evento.' });

@@ -1,13 +1,41 @@
-<form method="post" action="/admin/pedidos/<%= o.id %>/estado" class="row" style="gap:6px">
-  <input type="hidden" name="_csrf" value="<%= csrf %>"><input type="hidden" name="back" value="<%= back %>">
-  <input type="text" name="admin_note" placeholder="Nota (opcional)" style="width:160px;padding:6px 8px" maxlength="300">
-  <% if (o.status !== 'paid') { %><button class="btn sm" name="status" value="paid">✅ Confirmar pago</button><% } %>
-  <% if (['review','pending'].includes(o.status)) { %><button class="btn sm bad" name="status" value="rejected">Rechazar</button><% } %>
-  <% if (['paid','rejected','cancelled'].includes(o.status)) { %><button class="btn sm ghost" name="status" value="pending">Volver a pendiente</button><% } %>
-</form>
-<% if (['pending','rejected','cancelled'].includes(o.status)) { %>
-<form method="post" action="/admin/pedidos/<%= o.id %>/eliminar" data-confirm="¿Eliminar definitivamente el pedido #<%= o.id %>? Esta acción no se puede deshacer." style="margin-top:4px">
-  <input type="hidden" name="_csrf" value="<%= csrf %>"><input type="hidden" name="back" value="<%= back %>">
-  <button class="btn sm ghost" style="color:var(--bad)">🗑 Eliminar</button>
-</form>
+<%# Acciones de abonos de un pedido: o (con payments, paid), back %>
+<%- include('../partials/progress', { paid: o.paid, total: o.total }) %>
+<% (o.payments || []).forEach(p => { %>
+<div class="row" style="gap:6px;margin:4px 0;padding:4px 0;border-bottom:1px dashed var(--line)">
+  <span class="small"><b><%= h.fmtCOP(p.amount) %></b> · <%= h.PAY_METHOD[p.method] %><%= p.receipt_ref ? ' · ' + p.receipt_ref : '' %> <span class="badge <%= h.PAY_STATUS[p.status].cls %>"><%= h.PAY_STATUS[p.status].label %></span>
+    <% if (p.receipt) { %><a href="/uploads/<%= p.receipt %>" target="_blank">ver</a><% } %><% if (p.note) { %><br><span class="muted"><%= p.note %></span><% } %></span>
+  <% if (p.status === 'review') { %>
+  <form method="post" action="/admin/abonos/<%= p.id %>/estado" class="row" style="gap:4px">
+    <input type="hidden" name="_csrf" value="<%= csrf %>"><input type="hidden" name="back" value="<%= back %>">
+    <input type="number" name="amount" value="<%= p.amount %>" min="1" step="any" title="Ajusta el valor si el comprobante muestra otro monto" style="width:110px;padding:4px 6px">
+    <input type="text" name="note" placeholder="Nota" style="width:120px;padding:4px 6px" maxlength="300">
+    <button class="btn sm" name="status" value="confirmed">✅ Confirmar</button>
+    <button class="btn sm bad" name="status" value="rejected">Rechazar</button>
+  </form>
+  <% } else if (p.status === 'confirmed' && !p.receipt) { %>
+  <form method="post" action="/admin/abonos/<%= p.id %>/estado"><input type="hidden" name="_csrf" value="<%= csrf %>"><input type="hidden" name="back" value="<%= back %>"><button class="btn ghost sm" name="status" value="rejected" title="Anular este abono manual">Anular</button></form>
+  <% } %>
+</div>
+<% }) %>
+<% if (!['paid','cancelled'].includes(o.status)) { %>
+<details class="mt" style="font-size:.9rem"><summary style="cursor:pointer">💵 Registrar abono manual (efectivo u otro medio)</summary>
+  <form method="post" action="/admin/pedidos/<%= o.id %>/abono" class="row mt" style="gap:4px">
+    <input type="hidden" name="_csrf" value="<%= csrf %>"><input type="hidden" name="back" value="<%= back %>">
+    <input type="number" name="amount" placeholder="Valor" min="1" step="any" max="<%= o.total - o.paid %>" style="width:110px;padding:4px 6px" required>
+    <select name="method" style="width:auto;padding:4px 6px"><option value="cash">Efectivo</option><option value="transfer">Transferencia</option><option value="other">Otro</option></select>
+    <input type="text" name="note" placeholder="Nota (quién lo recibió, cuándo)" style="width:180px;padding:4px 6px" maxlength="260">
+    <button class="btn sm" name="action" value="add">Registrar</button>
+    <button class="btn sm sec" name="action" value="full" title="Registra el saldo completo como pagado">Saldo completo</button>
+  </form>
+</details>
 <% } %>
+<div class="row mt" style="gap:4px">
+  <% if (!['paid','cancelled'].includes(o.status)) { %>
+  <form method="post" action="/admin/pedidos/<%= o.id %>/abono"><input type="hidden" name="_csrf" value="<%= csrf %>"><input type="hidden" name="back" value="<%= back %>"><button class="btn ghost sm" name="action" value="cancel">Cancelar pedido</button></form>
+  <% } else if (o.status === 'cancelled') { %>
+  <form method="post" action="/admin/pedidos/<%= o.id %>/abono"><input type="hidden" name="_csrf" value="<%= csrf %>"><input type="hidden" name="back" value="<%= back %>"><button class="btn ghost sm" name="action" value="reopen">Reabrir</button></form>
+  <% } %>
+  <% if (['pending','cancelled'].includes(o.status) && !o.paid) { %>
+  <form method="post" action="/admin/pedidos/<%= o.id %>/eliminar" data-confirm="¿Eliminar definitivamente el pedido #<%= o.id %>?"><input type="hidden" name="_csrf" value="<%= csrf %>"><input type="hidden" name="back" value="<%= back %>"><button class="btn sm ghost" style="color:var(--bad)">🗑 Eliminar</button></form>
+  <% } %>
+</div>

@@ -98,6 +98,13 @@
     inp.addEventListener('blur', () => dupCheck(inp, warn, alias));
   });
 
+  // Invitaciones: marcar enviada al abrir WhatsApp
+  document.querySelectorAll('a.wa[data-sent]').forEach(a => a.addEventListener('click', () => {
+    const csrf = document.querySelector('[name=_csrf]'); if (!csrf) return;
+    fetch(a.dataset.sent, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: '_csrf=' + encodeURIComponent(csrf.value) }).catch(() => {});
+    a.textContent = '💬 Reenviar';
+  }));
+
   // Copiar número Nequi
   document.querySelectorAll('.copy').forEach(b => b.addEventListener('click', async () => {
     try { await navigator.clipboard.writeText(b.dataset.copy); b.textContent = '¡Copiado!'; setTimeout(() => b.textContent = 'Copiar', 1500); } catch {}

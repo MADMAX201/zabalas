@@ -18,7 +18,7 @@ const eventStats = db.prepare(`
 r.get('/', requireLogin, (req, res) => {
   const now = h.nowLocalISO();
   // Eventos privados: solo se listan si el integrante ya ingresó el código (o es admin)
-  const vis = req.user.role === 'admin' ? '' : `AND (access_code IS NULL OR access_code = '' OR id IN (SELECT event_id FROM event_access WHERE user_id = ${req.user.id}))`;
+  const vis = req.user.role === 'admin' ? '' : `AND (access_code IS NULL OR access_code = '' OR organizer_id = ${req.user.id} OR id IN (SELECT event_id FROM event_access WHERE user_id = ${req.user.id}))`;
   const upcoming = db.prepare(`SELECT * FROM events WHERE published = 1 AND status = 'approved' ${vis} AND COALESCE(ends_at, starts_at) >= ? ORDER BY starts_at ASC`).all(now);
   const past = db.prepare(`SELECT * FROM events WHERE published = 1 AND status = 'approved' ${vis} AND COALESCE(ends_at, starts_at) < ? ORDER BY starts_at DESC LIMIT 12`).all(now);
   const myEvents = db.prepare('SELECT * FROM events WHERE organizer_id = ? ORDER BY created_at DESC').all(req.user.id);
@@ -34,7 +34,7 @@ r.get('/', requireLogin, (req, res) => {
 });
 
 function hasAccess(ev, user) {
-  if (!ev.access_code || user.role === 'admin') return true;
+  if (!ev.access_code || canManage(ev, user)) return true;
   return !!db.prepare('SELECT 1 FROM event_access WHERE event_id = ? AND user_id = ?').get(ev.id, user.id);
 }
 function loadEvent(req, res, next) {
@@ -136,7 +136,7 @@ r.get('/eventos/:id', requireLogin, loadEvent, (req, res) => {
 
 function soldQty(productId) {
   return db.prepare(`SELECT COALESCE(SUM(oi.qty),0) AS n FROM order_items oi JOIN orders o ON o.id = oi.order_id
-    WHERE oi.product_id = ? AND o.status IN ('pending','review','paid')`).get(productId).n;
+    WHERE oi.product_id = ? AND o.status IN ('pending','partial','review','paid')`).get(productId).n;
 }
 
 r.post('/eventos/:id/asistencia', requireLogin, loadEvent, (req, res) => {

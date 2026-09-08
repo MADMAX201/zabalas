@@ -1,6 +1,6 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
-const { db, settings, household, findSimilar, addHouseholdMember, isFullName } = require('../db');
+const { db, settings, household, findSimilar, addHouseholdMember, isFullName, linkUserToHousehold } = require('../db');
 const { requireLogin } = require('../middleware');
 
 const r = express.Router();
@@ -40,9 +40,14 @@ r.post('/login', (req, res) => {
   });
 });
 
+function inviteByToken(tok) {
+  if (!tok) return null;
+  return db.prepare("SELECT i.*, e.title AS event_title FROM invitations i JOIN events e ON e.id = i.event_id WHERE i.token = ? AND e.status = 'approved' AND e.published = 1").get(String(tok));
+}
 r.get('/registro', (req, res) => {
   if (req.user) return res.redirect('/');
-  res.render('register', { title: 'Crear cuenta', error: null, form: {} });
+  const inv = inviteByToken(req.query.inv);
+  res.render('register', { title: 'Crear cuenta', error: null, form: inv ? { name: inv.name, phone: inv.phone || '', inv: inv.token } : {}, inv });
 });
 
 r.post('/registro', (req, res) => {
@@ -53,22 +58,34 @@ r.post('/registro', (req, res) => {
     code: String(req.body.code || '').trim(),
   };
   const pw = String(req.body.password || '');
-  const fail = (error) => res.status(400).render('register', { title: 'Crear cuenta', error, form });
+  const inv = inviteByToken(req.body.inv);
+  if (inv) form.inv = inv.token;
+  const fail = (error) => res.status(400).render('register', { title: 'Crear cuenta', error, form, inv });
 
   if (form.name.length < 2) return fail('Escribe tu nombre completo.');
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.email)) return fail('Correo inválido.');
   if (pw.length < 6) return fail('La contraseña debe tener al menos 6 caracteres.');
   if (pw !== String(req.body.password2 || '')) return fail('Las contraseñas no coinciden.');
-  if (form.code.toUpperCase() !== String(settings.get('family_code') || '').toUpperCase()) return fail('El código familiar no es correcto. Pídeselo a quien te invitó.');
+  // Con invitación válida no hace falta el código familiar
+  if (!inv && form.code.toUpperCase() !== String(settings.get('family_code') || '').toUpperCase()) return fail('El código familiar no es correcto. Pídeselo a quien te invitó.');
   if (db.prepare('SELECT id FROM users WHERE email = ?').get(form.email)) return fail('Ya existe una cuenta con ese correo. Intenta ingresar.');
 
   const isFirst = db.prepare('SELECT COUNT(*) AS n FROM users').get().n === 0;
   const info = db.prepare('INSERT INTO users (name, email, phone, password_hash, role) VALUES (?, ?, ?, ?, ?)')
     .run(form.name, form.email, form.phone || null, bcrypt.hashSync(pw, 10), isFirst ? 'admin' : 'member');
+  const newUser = { id: info.lastInsertRowid, name: form.name };
+  linkUserToHousehold(newUser);
+  let to = '/';
+  if (inv) {
+    db.prepare('INSERT OR IGNORE INTO event_access (event_id, user_id) VALUES (?, ?)').run(inv.event_id, newUser.id);
+    db.prepare("UPDATE invitations SET user_id = ?, accepted_at = COALESCE(accepted_at, datetime('now','localtime')) WHERE id = ?").run(newUser.id, inv.id);
+    if (inv.member_id) db.prepare('UPDATE household_members SET linked_user_id = ? WHERE id = ? AND linked_user_id IS NULL').run(newUser.id, inv.member_id);
+    to = `/eventos/${inv.event_id}`;
+  }
   req.session.regenerate(() => {
-    req.session.userId = info.lastInsertRowid;
-    req.flash('ok', `¡Bienvenido/a, ${form.name.split(' ')[0]}!`);
-    res.redirect('/');
+    req.session.userId = newUser.id;
+    req.flash('ok', `¡Bienvenido/a, ${form.name.split(' ')[0]}!${inv ? ' Ya tienes acceso al evento: confirma tu asistencia.' : ''}`);
+    res.redirect(to);
   });
 });
 

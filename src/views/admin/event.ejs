@@ -28,6 +28,7 @@
     <a class="btn sec sm" href="/eventos/<%= ev.id %>">Ver como integrante</a>
     <% if (pay.own) { %><span class="badge brand" title="<%= pay.holder %>">💸 <%= pay.method === 'breb' ? 'Bre-B' : 'Nequi' %> <%= pay.number %></span><% } else { %><span class="badge muted" title="Se usa el Nequi general del sitio">💸 Nequi del sitio</span><% } %>
     <a class="btn ghost sm" href="/admin/eventos/<%= ev.id %>/editar">Editar</a>
+    <a class="btn sm sec" href="/admin/eventos/<%= ev.id %>/invitaciones">✉️ Invitaciones</a>
     <a class="btn sm" href="/admin/eventos/<%= ev.id %>/exportar.xlsx">📊 Exportar Excel</a>
   </div>
 </div>
@@ -40,6 +41,9 @@
   </div>
   <p class="small muted" style="margin:6px 0 0">Admitidos con código (<%= admitted.length %>): <%= admitted.map(x => x.name).join(', ') || 'nadie todavía' %></p>
 </div>
+<% } %>
+<% if (totals.self && totals.self.length) { %>
+<div class="flash info mt">Con cuenta propia y ya confirmaron por su cuenta (no se cuentan como acompañantes): <%= totals.self.map(d => `${d.name} (núcleo de ${d.owner})`).join('; ') %></div>
 <% } %>
 <% if (totals.dups && totals.dups.length) { %>
 <div class="flash info mt">Personas marcadas por más de un titular (se cuentan una sola vez): <%= totals.dups.map(d => `${d.name} (${d.owners.join(' y ')})`).join('; ') %></div>
@@ -113,15 +117,14 @@
   <h2>Pedidos y pagos</h2>
   <% if (!orders.length) { %><p class="muted">Aún no hay pedidos.</p><% } else { %>
   <div class="scroll"><table class="tbl">
-    <tr><th>#</th><th>Integrante</th><th>Productos</th><th>Total</th><th>Estado</th><th>Comprobante</th><th>Acciones</th></tr>
+    <tr><th>#</th><th>Integrante</th><th>Productos</th><th>Total</th><th>Estado</th><th style="min-width:340px">Abonos y acciones</th></tr>
     <% orders.forEach(o => { %>
     <tr>
       <td><a href="/pedidos/<%= o.id %>">#<%= o.id %></a></td>
       <td><%= o.user_name %><% if (o.phone) { %><br><span class="small muted"><%= o.phone %></span><% } %></td>
       <td class="small"><%= o.items.map(i => `${i.qty}× ${i.name}${i.size ? ' ('+i.size+')' : ''}${i.for_name ? ' para '+i.for_name : ''}`).join('; ') %></td>
-      <td><b><%= h.fmtCOP(o.total) %></b></td>
+      <td><b><%= h.fmtCOP(o.total) %></b><% if (o.paid > 0 && o.paid < o.total) { %><br><span class="small muted">abonado <%= h.fmtCOP(o.paid) %></span><% } %></td>
       <td><span class="badge <%= h.ORDER_STATUS[o.status].cls %>"><%= h.ORDER_STATUS[o.status].label %></span></td>
-      <td><% if (o.receipt) { %><a href="/uploads/<%= o.receipt %>" target="_blank">Ver</a><% if (o.receipt_ref) { %><br><span class="small muted"><%= o.receipt_ref %></span><% } %><% } else { %>—<% } %></td>
       <td><%- include('_order_actions', { o, back: '/admin/eventos/' + ev.id + '#pedidos' }) %></td>
     </tr>
     <% }) %>

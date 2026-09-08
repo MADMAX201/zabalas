@@ -60,6 +60,9 @@ app.use(require('./routes/auth'));
 app.use(require('./routes/events'));
 app.use(require('./routes/orders'));
 app.use(require('./routes/gallery'));
+const invites = require('./routes/invites');
+app.use(invites.pub);
+app.use('/admin', invites.mgr);
 app.use('/admin', require('./routes/admin'));
 
 app.use((req, res) => res.status(404).render('error', { title: 'No encontrado', message: 'Esta página no existe.' }));

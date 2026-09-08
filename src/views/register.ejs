@@ -3,8 +3,9 @@
   <div class="card">
     <img class="auth-logo" src="/img/logo.jpeg" alt="<%= site.site_name %>">
     <h1>Crear cuenta</h1>
+    <% if (inv) { %><div class="flash ok">Invitación a <b><%= inv.event_title %></b>. Crea tu cuenta y quedarás dentro del evento.</div><input type="hidden" name="inv" value="<%= inv.token %>" form="regForm"><% } %>
     <% if (error) { %><div class="err"><%= error %></div><% } %>
-    <form method="post" action="/registro">
+    <form method="post" action="/registro" id="regForm">
       <input type="hidden" name="_csrf" value="<%= csrf %>">
       <label for="name">Nombre completo</label>
       <input id="name" type="text" name="name" value="<%= form.name || '' %>" required autocomplete="name">
@@ -16,9 +17,11 @@
       <input id="password" type="password" name="password" required minlength="6" autocomplete="new-password">
       <label for="password2">Repite la contraseña</label>
       <input id="password2" type="password" name="password2" required minlength="6" autocomplete="new-password">
+      <% if (!inv) { %>
       <label for="code">Código familiar</label>
       <input id="code" type="text" name="code" value="<%= form.code || '' %>" required autocapitalize="characters" style="text-transform:uppercase">
       <div class="help">Te lo da la persona que te invitó.</div>
+      <% } %>
       <button class="btn block mt">Crear mi cuenta</button>
     </form>
     <p class="center mt">¿Ya tienes cuenta? <a href="/login">Ingresar</a></p>

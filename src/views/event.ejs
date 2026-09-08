@@ -60,7 +60,7 @@
           <% if (!members.length) { %><div class="help">Agrega a las personas de tu núcleo familiar; quedan guardadas para los próximos eventos.</div><% } %>
           <% members.forEach(mm => { %>
           <label class="date-opt"><input type="checkbox" name="member_ids" value="<%= mm.id %>" <%= myCompanions.has(mm.id) ? 'checked' : '' %>>
-            <span class="date-txt"><b><%= mm.name %></b><% if (mm.note) { %><span class="small muted"><%= mm.note %></span><% } %></span></label>
+            <span class="date-txt"><b><%= mm.name %></b><span class="small muted"><%= mm.note || '' %><%= mm.linked_user_id ? (mm.note ? ' · ' : '') + 'tiene cuenta propia' : '' %></span></span></label>
           <% }) %>
           <div id="newPeople"></div>
           <button type="button" class="btn ghost sm mt" id="addPerson">＋ Agregar persona</button>
@@ -119,13 +119,13 @@
     <% if (!products.length) { %>
       <p class="muted">Este evento no tiene productos para comprar.</p>
     <% } else { %>
-    <% const pendingOrder = myOrders.find(o => o.status === 'pending'); %>
+    <% const pendingOrder = myOrders.find(o => ['pending','partial'].includes(o.status)); %>
     <% if (pendingOrder) { %>
     <div class="flash warn">
-      Tienes el <b>pedido #<%= pendingOrder.id %></b> sin pagar (<%= h.fmtCOP(pendingOrder.total) %>).
+      Tienes el <b>pedido #<%= pendingOrder.id %></b> <%= pendingOrder.status === 'partial' ? 'con saldo pendiente' : 'sin pagar' %> (<%= h.fmtCOP(pendingOrder.total) %>).
       <div class="row mt" style="gap:8px">
         <a class="btn sm" href="/pedidos/<%= pendingOrder.id %>">💸 Pagar ahora</a>
-        <a class="btn sm sec" href="/pedidos/<%= pendingOrder.id %>/editar">✏️ Cambiar tallas o cantidades</a>
+        <% if (pendingOrder.status === 'pending') { %><a class="btn sm sec" href="/pedidos/<%= pendingOrder.id %>/editar">✏️ Cambiar tallas o cantidades</a><% } %>
       </div>
     </div>
     <details><summary class="muted small" style="cursor:pointer">¿Necesitas hacer otro pedido aparte?</summary>
@@ -143,15 +143,13 @@
         <td><a href="/pedidos/<%= o.id %>">#<%= o.id %></a><br><span class="small muted"><%= o.items.map(i => `${i.qty}× ${i.name}${i.size ? ' ('+i.size+')' : ''}`).join(', ') %></span></td>
         <td class="right"><b><%= h.fmtCOP(o.total) %></b><br><span class="badge <%= h.ORDER_STATUS[o.status].cls %>"><%= h.ORDER_STATUS[o.status].label %></span></td>
       </tr>
-      <% if (o.status === 'pending') { %>
+      <% if (['pending','partial'].includes(o.status)) { %>
       <tr><td colspan="2" style="padding-top:0;border-bottom:1px solid var(--line)">
         <div class="row" style="gap:8px">
-          <a class="btn sm" href="/pedidos/<%= o.id %>">💸 Retomar pago</a>
-          <a class="btn sm sec" href="/pedidos/<%= o.id %>/editar">✏️ Editar pedido</a>
+          <a class="btn sm" href="/pedidos/<%= o.id %>">💸 <%= o.status === 'partial' ? 'Seguir abonando' : 'Retomar pago' %></a>
+          <% if (o.status === 'pending') { %><a class="btn sm sec" href="/pedidos/<%= o.id %>/editar">✏️ Editar pedido</a><% } %>
         </div>
       </td></tr>
-      <% } else if (o.status === 'rejected') { %>
-      <tr><td colspan="2" style="padding-top:0"><a class="btn sm warn" href="/pedidos/<%= o.id %>">Subir otro comprobante</a></td></tr>
       <% } %>
       <% }) %>
     </table>

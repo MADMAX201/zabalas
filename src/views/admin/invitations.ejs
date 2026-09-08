@@ -1,0 +1,85 @@
+<%- include('../partials/head') %>
+<p><a href="/admin/eventos/<%= ev.id %>">← <%= ev.title %></a></p>
+<div class="row between">
+  <div><h1>✉️ Invitaciones</h1><p class="muted small">Cada invitado recibe un enlace personal. Se envía desde tu WhatsApp con el mensaje listo.</p></div>
+  <div class="stats" style="grid-template-columns:repeat(3,auto);gap:8px">
+    <div class="stat"><b><%= stats.total %></b><span>creadas</span></div>
+    <div class="stat"><b><%= stats.sent %></b><span>enviadas</span></div>
+    <div class="stat"><b><%= stats.accepted %></b><span>aceptadas</span></div>
+  </div>
+</div>
+
+<div class="card mt">
+  <h2>Lista de invitados</h2>
+  <% if (!invitations.length) { %><p class="muted">Aún no has agregado invitados. Selecciónalos abajo.</p><% } else { %>
+  <div class="scroll"><table class="tbl">
+    <tr><th>Invitado</th><th>WhatsApp</th><th>Estado</th><th></th></tr>
+    <% invitations.forEach(i => { %>
+    <tr>
+      <td><b><%= i.name %></b><% if (i.user_id) { %> <span class="badge muted">tiene cuenta</span><% } else if (i.member_id) { %> <span class="badge muted">de un núcleo</span><% } %></td>
+      <td>
+        <% if (i.wa) { %><span class="small"><%= i.phone %></span>
+        <% } else { %>
+        <form method="post" action="/admin/invitaciones/<%= i.id %>/telefono" class="row" style="gap:4px"><input type="hidden" name="_csrf" value="<%= csrf %>">
+          <input type="tel" name="phone" placeholder="300 123 4567" style="width:140px;padding:4px 6px"><button class="btn ghost sm">Guardar</button></form>
+        <% } %>
+      </td>
+      <td>
+        <% if (i.accepted_at) { %><span class="badge ok">Aceptó</span><% if (i.rsvp) { %> <span class="badge <%= h.RSVP[i.rsvp.status].cls %>"><%= h.RSVP[i.rsvp.status].label %></span><% } %>
+        <% } else if (i.opened_at) { %><span class="badge info">Abrió el enlace</span>
+        <% } else if (i.sent_at) { %><span class="badge warn">Enviada</span>
+        <% } else { %><span class="badge muted">Sin enviar</span><% } %>
+      </td>
+      <td class="right"><div class="row" style="justify-content:flex-end;gap:4px">
+        <% if (i.wa) { %><a class="btn sm wa" href="https://wa.me/<%= i.wa %>?text=<%= encodeURIComponent(i.message) %>" target="_blank" rel="noopener" data-sent="/admin/invitaciones/<%= i.id %>/enviado">💬 <%= i.sent_at ? 'Reenviar' : 'Enviar por WhatsApp' %></a><% } %>
+        <button type="button" class="btn ghost sm copy" data-copy="<%= i.link %>" title="Copiar enlace">🔗 Copiar</button>
+        <form method="post" action="/admin/invitaciones/<%= i.id %>/eliminar" data-confirm="¿Eliminar la invitación de <%= i.name %>?"><input type="hidden" name="_csrf" value="<%= csrf %>"><button class="btn ghost sm">✕</button></form>
+      </div></td>
+    </tr>
+    <% }) %>
+  </table></div>
+  <% } %>
+</div>
+
+<div class="grid two mt">
+  <div class="card">
+    <h2>Agregar invitados</h2>
+    <form method="post" action="/admin/eventos/<%= ev.id %>/invitaciones">
+      <input type="hidden" name="_csrf" value="<%= csrf %>">
+      <% if (users.length) { %>
+      <details open><summary style="cursor:pointer;font-weight:600">Integrantes con cuenta (<%= users.length %>)</summary>
+        <div class="dates-box" style="max-height:260px;overflow:auto">
+          <% users.forEach(u => { %><label class="date-opt"><input type="checkbox" name="user_ids" value="<%= u.id %>"><span class="date-txt"><b><%= u.name %></b><span class="small muted"><%= u.phone || 'sin celular' %></span></span></label><% }) %>
+        </div>
+      </details>
+      <% } %>
+      <% if (members.length) { %>
+      <details class="mt"><summary style="cursor:pointer;font-weight:600">Personas de los núcleos familiares sin cuenta (<%= members.length %>)</summary>
+        <div class="help">Al aceptar la invitación crean su propia cuenta y quedan vinculadas con su núcleo (no se cuentan dos veces).</div>
+        <div class="dates-box" style="max-height:260px;overflow:auto">
+          <% members.forEach(m => { %><label class="date-opt"><input type="checkbox" name="member_ids" value="<%= m.id %>"><span class="date-txt"><b><%= m.name %></b><span class="small muted"><%= m.note ? m.note + ' · ' : '' %>núcleo de <%= m.owner %></span></span>
+            <input type="tel" name="member_phone_<%= m.id %>" placeholder="Celular" style="width:130px;padding:4px 6px" onclick="event.preventDefault()"></label><% }) %>
+        </div>
+      </details>
+      <% } %>
+      <details class="mt"><summary style="cursor:pointer;font-weight:600">Otras personas (nombre y celular)</summary>
+        <div id="newInvites">
+          <div class="row" style="gap:6px;margin-top:6px"><input type="text" name="new_name" placeholder="Nombre y apellido" style="flex:2"><input type="tel" name="new_phone" placeholder="300 123 4567" style="flex:1"></div>
+          <div class="row" style="gap:6px;margin-top:6px"><input type="text" name="new_name" placeholder="Nombre y apellido" style="flex:2"><input type="tel" name="new_phone" placeholder="300 123 4567" style="flex:1"></div>
+          <div class="row" style="gap:6px;margin-top:6px"><input type="text" name="new_name" placeholder="Nombre y apellido" style="flex:2"><input type="tel" name="new_phone" placeholder="300 123 4567" style="flex:1"></div>
+        </div>
+      </details>
+      <button class="btn mt">Crear invitaciones</button>
+    </form>
+  </div>
+  <div class="card">
+    <h2>Mensaje de invitación</h2>
+    <form method="post" action="/admin/eventos/<%= ev.id %>/invitaciones/mensaje">
+      <input type="hidden" name="_csrf" value="<%= csrf %>">
+      <textarea name="invite_message" maxlength="600"><%= ev.invite_message || defaultMsg %></textarea>
+      <div class="help">Variables: <code>{nombre}</code> <code>{evento}</code> <code>{fecha}</code> <code>{lugar}</code> <code>{enlace}</code><% if (ev.access_code) { %> <code>{codigo}</code><% } %>. El enlace es personal para cada invitado y le da acceso al evento sin códigos.</div>
+      <button class="btn sec mt">Guardar mensaje</button>
+    </form>
+  </div>
+</div>
+<%- include('../partials/foot') %>

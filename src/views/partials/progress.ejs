@@ -1,0 +1,4 @@
+<%# Barra de avance de pago: paid, total %>
+<% const pct = total > 0 ? Math.min(100, Math.round(paid * 100 / total)) : 0; %>
+<div class="prog" title="<%= h.fmtCOP(paid) %> de <%= h.fmtCOP(total) %>"><div class="prog-bar <%= pct >= 100 ? 'done' : '' %>" style="width:<%= pct %>%"></div></div>
+<div class="small muted"><%= h.fmtCOP(paid) %> de <%= h.fmtCOP(total) %> · <b><%= pct %>%</b><% if (total - paid > 0) { %> · saldo <b style="color:var(--warn)"><%= h.fmtCOP(total - paid) %></b><% } %></div>
